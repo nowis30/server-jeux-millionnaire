@@ -146,6 +146,23 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     return reply.send({ ok: true, removed: { listings: listings.count, repairs: repairs.count, refinanceLogs: refis.count, propertyHoldings: holdings.count, marketTicks: ticks.count, marketHoldings: mktHoldings.count, players: players.count, games: games.count } });
   });
 
+  // Endpoint admin: seed des PropertyTemplate depuis JSON + génération jusqu'à min=50
+  app.post("/api/admin/seed-templates", async (req, reply) => {
+    const q = (req as any).query ?? {};
+    const secret = String(q.secret || "");
+    if (!env.ADMIN_VERIFY_SECRET || secret !== env.ADMIN_VERIFY_SECRET) {
+      return reply.status(403).send({ error: "Forbidden" });
+    }
+    try {
+      const { seedAll } = await import("../services/seeder");
+      const res = await seedAll(50);
+      return reply.send({ ok: true, ...res });
+    } catch (e) {
+      req.log.error({ err: e }, "seed-templates failed");
+      return reply.status(500).send({ error: "Seed failed" });
+    }
+  });
+
   // me
   app.get("/api/auth/me", async (req, reply) => {
     try {
