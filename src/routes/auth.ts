@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "../prisma";
 import bcrypt from "bcryptjs";
 import { env } from "../env";
+import { nanoid } from "nanoid";
 
 const RegisterSchema = z.object({
   email: z.string().email(),
@@ -76,6 +77,23 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     reply.clearCookie("hm_auth", { path: "/" });
     reply.clearCookie("hm_csrf", { path: "/" });
     return reply.send({ ok: true });
+  });
+
+  // CSRF token endpoint: renvoie un token utilisable côté client pour les requêtes cross-site
+  // Stratégie: si cookie hm_csrf manquant, on le génère ici ET on renvoie la même valeur en JSON.
+  // Le client lit le JSON et place la valeur dans l'entête x-csrf-token pour les requêtes POST/PUT/etc.
+  app.get("/api/auth/csrf", async (req, reply) => {
+    let token = (req as any).cookies?.["hm_csrf"] as string | undefined;
+    if (!token) {
+      token = nanoid();
+      reply.setCookie("hm_csrf", token, {
+        path: "/",
+        httpOnly: false,
+        sameSite: "none",
+        secure: true,
+      });
+    }
+    return reply.send({ csrf: token });
   });
 }
 
