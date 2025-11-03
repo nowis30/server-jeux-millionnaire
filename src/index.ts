@@ -13,9 +13,30 @@ import { registerListingRoutes } from "./routes/listings";
 import { prisma } from "./prisma";
 import type { Server as SocketIOServer } from "socket.io";
 import { registerHealthRoutes } from "./routes/health";
+import { registerAuthRoutes } from "./routes/auth";
 import { registerDocs } from "./routes/docs";
+import { execSync } from "child_process";
 
 async function bootstrap() {
+  // Option: exécuter les migrations Prisma au démarrage si demandé
+  if (env.MIGRATE_ON_BOOT) {
+    try {
+      console.log("[boot] Running prisma migrate deploy...");
+      execSync("npx prisma migrate deploy", { stdio: "inherit" });
+      console.log("[boot] Prisma migrate deploy done.");
+    } catch (e) {
+      console.error("[boot] Prisma migrate deploy failed", e);
+    }
+  }
+  if (env.SEED_ON_BOOT) {
+    try {
+      console.log("[boot] Running seed script prisma/seed.js...");
+      execSync("node prisma/seed.js", { stdio: "inherit" });
+      console.log("[boot] Seed done.");
+    } catch (e) {
+      console.error("[boot] Seed failed", e);
+    }
+  }
   const app = Fastify({ logger: true });
   // CORS: accepter une liste d'origines
   await app.register(cors, {
@@ -70,6 +91,7 @@ async function bootstrap() {
   await registerMarketRoutes(app);
   await registerListingRoutes(app);
   await registerHealthRoutes(app);
+  await registerAuthRoutes(app);
   try {
     await registerDocs(app);
   } catch (e) {

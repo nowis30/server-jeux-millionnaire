@@ -25,4 +25,5 @@ RUN npm run prisma:generate && npm run build
 
 EXPOSE 3001
 
-CMD ["node", "dist/index.js"]
+# Exécuter les migrations avant de démarrer (utile si image Docker utilisée)
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/index.js"]

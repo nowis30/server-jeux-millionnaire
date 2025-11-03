@@ -18,6 +18,8 @@ export const env = {
   NODE_ENV: process.env.NODE_ENV ?? "development",
   JWT_SECRET: process.env.JWT_SECRET ?? "dev-secret-change-me",
   ADMIN_EMAIL: process.env.ADMIN_EMAIL ?? "",
+  MIGRATE_ON_BOOT: (process.env.MIGRATE_ON_BOOT ?? "false").toLowerCase() === "true",
+  SEED_ON_BOOT: (process.env.SEED_ON_BOOT ?? "false").toLowerCase() === "true",
   // Autoriser plusieurs origines, séparées par des virgules
   CLIENT_ORIGINS: (process.env.CLIENT_ORIGIN ?? "http://localhost:3000")
     .split(",")
