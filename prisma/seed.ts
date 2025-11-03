@@ -47,6 +47,9 @@ function illustrationForType(t: string): string {
   const key = t.toLowerCase();
   if (key.includes("duplex")) return "/images/props/duplex.svg";
   if (key.includes("triplex")) return "/images/props/triplex.svg";
+  if (/(quadruplex|4-?plex|fourplex)/i.test(t)) return "/images/props/quadruplex.svg";
+  if (/(6-?plex|sixplex|six-?plex)/i.test(t)) return "/images/props/6plex.svg";
+  if (/(commercial|commerciale)/i.test(t)) return "/images/props/commercial.svg";
   // défaut: maison
   return "/images/props/maison.svg";
 }
@@ -128,10 +131,14 @@ async function seedGenerated(minTotal = 50): Promise<number> {
     const electricityState = pick(cycle as unknown as string[], i + 2);
     const roofState = pick(cycle as unknown as string[], i + 3);
 
+    const name = `Immeuble #${String(i + 1).padStart(2, "0")}`;
+    // Déduire un "type" simple à partir du nombre d'unités pour illustrer
+    const kind = units === 1 ? "Maison" : units === 2 ? "Duplex" : units === 3 ? "Triplex" : units === 4 ? "Quadruplex" : units >= 6 ? "6-plex" : "Maison";
+    const imageUrl = illustrationForType(kind);
     return {
-      name: `Immeuble #${String(i + 1).padStart(2, "0")}`,
+      name,
       city,
-      imageUrl: "",
+      imageUrl,
       description: `Bel immeuble locatif situé à ${city}. ${units} logement(s), état plomberie: ${plumbingState}, électricité: ${electricityState}, toiture: ${roofState}. Revenus potentiels stables avec loyer de base ≈ ${Math.round(baseRent)}$ par unité.`,
       price,
       baseRent,
