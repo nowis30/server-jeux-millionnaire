@@ -3,6 +3,9 @@ FROM node:20-alpine
 # Dossier de travail dans le conteneur
 WORKDIR /app
 
+# Les binaires Prisma musl nécessitent libssl 1.1 dans l'image Alpine.
+RUN apk add --no-cache openssl1.1-compat
+
 # Installer les dépendances (inclut devDependencies pour la compilation)
 COPY package*.json ./
 # Utiliser npm install pour générer un lock cohérent en environnement CI
