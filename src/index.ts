@@ -18,6 +18,7 @@ import { registerHealthRoutes } from "./routes/health";
 import { registerAuthRoutes } from "./routes/auth";
 import { registerDocs } from "./routes/docs";
 import { execSync } from "child_process";
+import { prisma as prismaClient } from "./prisma";
 
 async function bootstrap() {
   // Option: exécuter les migrations Prisma au démarrage si demandé
@@ -216,3 +217,20 @@ bootstrap().catch((err) => {
   console.error(err);
   process.exit(1);
 });
+
+// Assure l'existence d'une partie unique globale au démarrage
+(async () => {
+  try {
+    const GLOBAL_CODE = process.env.GLOBAL_GAME_CODE || "GLOBAL";
+    let g = await prismaClient.game.findUnique({ where: { code: GLOBAL_CODE } });
+    if (!g) {
+      g = await prismaClient.game.create({ data: { code: GLOBAL_CODE, status: "running", startedAt: new Date() } });
+      console.log(`[boot] Created global game ${g.code} (${g.id})`);
+    } else if (g.status !== "running") {
+      await prismaClient.game.update({ where: { id: g.id }, data: { status: "running", startedAt: g.startedAt ?? new Date() } });
+      console.log(`[boot] Ensured global game running (${g.code})`);
+    }
+  } catch (e) {
+    console.warn("[boot] ensure global game failed (will retry via API usage)", e);
+  }
+})();

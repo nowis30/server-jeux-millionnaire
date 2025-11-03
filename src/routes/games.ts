@@ -9,67 +9,57 @@ const codeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const codeGenerator = customAlphabet(codeAlphabet, 6);
 
 export async function registerGameRoutes(app: FastifyInstance) {
-  app.get("/api/games", async (req, reply) => {
-    const querySchema = z.object({ status: z.string().optional() });
-    const { status } = querySchema.parse((req as any).query ?? {});
-    const where = status ? { status } : {};
-    const games = await prisma.game.findMany({
-      where,
-      orderBy: { createdAt: "desc" },
-      include: { players: true },
-      take: 25,
-    });
-    const payload = games.map((g: typeof games[number]) => ({
+  app.get("/api/games", async (_req, reply) => {
+    const GLOBAL_CODE = process.env.GLOBAL_GAME_CODE || "GLOBAL";
+    // Retourner uniquement la partie globale (créer si manquante)
+    let g = await prisma.game.findUnique({ where: { code: GLOBAL_CODE }, include: { players: true } });
+    if (!g) {
+      g = await prisma.game.create({ data: { code: GLOBAL_CODE, status: "running", startedAt: new Date() }, include: { players: true } });
+    }
+    const payload = [{
       id: g.id,
       code: g.code,
       status: g.status,
       players: g.players.length,
       createdAt: g.createdAt,
-    }));
+    }];
     return reply.send({ games: payload });
   });
 
   // Créer une partie (option: créer aussi l'hôte pour le cookie invité courant)
   app.post("/api/games", async (req, reply) => {
-    const bodySchema = z.object({ code: z.string().optional(), hostNickname: z.string().min(2).optional() });
-    const { code, hostNickname } = bodySchema.parse((req as any).body ?? {});
+    const bodySchema = z.object({ hostNickname: z.string().min(2).optional() });
+    const { hostNickname } = bodySchema.parse((req as any).body ?? {});
+    const GLOBAL_CODE = process.env.GLOBAL_GAME_CODE || "GLOBAL";
+    let game = await prisma.game.findUnique({ where: { code: GLOBAL_CODE } });
+    if (!game) {
+      game = await prisma.game.create({ data: { code: GLOBAL_CODE, status: "running", startedAt: new Date() } });
+    } else if (game.status !== "running") {
+      game = await prisma.game.update({ where: { id: game.id }, data: { status: "running", startedAt: game.startedAt ?? new Date() } });
+    }
 
-    const desiredCode = (code ?? generateCode()).toUpperCase();
-    const existing = await prisma.game.findUnique({ where: { code: desiredCode } });
-    if (existing) return reply.status(409).send({ error: "Code déjà utilisé" });
-
-    const game = await prisma.game.create({
-      data: {
-        code: desiredCode,
-        status: "lobby",
-      },
-    });
-    // Notifier le lobby en temps réel
-    (app as any).io?.emit("lobby-update", { type: "created", gameId: game.id, code: game.code });
-
-    // Si un hostNickname est fourni, créer/associer le joueur hôte à ce cookie
+    // Optionnel: créer l'hôte lié au cookie invité
     let guestId = (req as any).cookies?.["hm_guest"] as string | undefined;
     let hostPlayer: { id: string } | undefined;
-    if (hostNickname && guestId) {
+    if (hostNickname) {
+      if (!guestId) {
+        const { nanoid } = await import("nanoid");
+        guestId = nanoid();
+        (reply as any).setCookie?.("hm_guest", guestId, { path: "/", httpOnly: true, sameSite: "lax", maxAge: 60 * 60 * 24 * 365 });
+      }
+      // vérifier unicité du pseudo
+      const trimmed = hostNickname.trim();
+      const dup = await prisma.player.findFirst({ where: { gameId: game.id, nickname: { equals: trimmed, mode: 'insensitive' } }, select: { id: true } });
+      if (dup) return reply.status(409).send({ error: "Pseudo déjà utilisé dans cette partie" });
       hostPlayer = await prisma.player.upsert({
         where: { gameId_guestId: { gameId: game.id, guestId } },
-        update: { nickname: hostNickname.trim() },
-        create: { nickname: hostNickname.trim(), cash: INITIAL_CASH, netWorth: INITIAL_CASH, gameId: game.id, guestId },
-        select: { id: true },
-      });
-    }
-    if (hostNickname && !guestId) {
-      const { nanoid } = await import("nanoid");
-      guestId = nanoid();
-      (reply as any).setCookie?.("hm_guest", guestId, { path: "/", httpOnly: true, sameSite: "lax", maxAge: 60 * 60 * 24 * 365 });
-      hostPlayer = await prisma.player.upsert({
-        where: { gameId_guestId: { gameId: game.id, guestId } },
-        update: { nickname: hostNickname.trim() },
-        create: { nickname: hostNickname.trim(), cash: INITIAL_CASH, netWorth: INITIAL_CASH, gameId: game.id, guestId },
+        update: { nickname: trimmed },
+        create: { nickname: trimmed, cash: INITIAL_CASH, netWorth: INITIAL_CASH, gameId: game.id, guestId },
         select: { id: true },
       });
     }
 
+    (app as any).io?.emit("lobby-update", { type: "created", gameId: game.id, code: game.code });
     return reply.send({ id: game.id, code: game.code, status: game.status, playerId: hostPlayer?.id });
   });
 
@@ -82,7 +72,7 @@ export async function registerGameRoutes(app: FastifyInstance) {
 
     const game = await prisma.game.findUnique({ where: { id } });
     if (!game) return reply.status(404).send({ error: "Game not found" });
-    if (game.status !== "lobby") return reply.status(400).send({ error: "Game already started" });
+  // Partie unique: autoriser le join même si la partie est en cours
 
     let guestId = (req as any).cookies?.["hm_guest"] as string | undefined;
     if (!guestId) {
@@ -91,10 +81,17 @@ export async function registerGameRoutes(app: FastifyInstance) {
       (reply as any).setCookie?.("hm_guest", guestId, { path: "/", httpOnly: true, sameSite: "lax", maxAge: 60 * 60 * 24 * 365 });
     }
 
+    const trimmed = nickname.trim();
+    // Refuser doublon de pseudo dans la même partie (insensible à la casse)
+    const existingByNickname = await prisma.player.findFirst({ where: { gameId: id, nickname: { equals: trimmed, mode: 'insensitive' } }, select: { id: true, guestId: true } });
+    const existingByGuest = await prisma.player.findUnique({ where: { gameId_guestId: { gameId: id, guestId } }, select: { id: true } });
+    if (existingByNickname && (!existingByGuest || existingByNickname.id !== existingByGuest.id)) {
+      return reply.status(409).send({ error: "Pseudo déjà utilisé dans cette partie" });
+    }
     const player = await prisma.player.upsert({
       where: { gameId_guestId: { gameId: id, guestId } },
-      update: { nickname: nickname.trim() },
-      create: { nickname: nickname.trim(), cash: INITIAL_CASH, netWorth: INITIAL_CASH, gameId: id, guestId },
+      update: { nickname: trimmed },
+      create: { nickname: trimmed, cash: INITIAL_CASH, netWorth: INITIAL_CASH, gameId: id, guestId },
       select: { id: true },
     });
     (app as any).io?.emit("lobby-update", { type: "joined", gameId: id });
@@ -109,8 +106,8 @@ export async function registerGameRoutes(app: FastifyInstance) {
     const { nickname } = bodySchema.parse((req as any).body);
 
     const game = await prisma.game.findUnique({ where: { code: code.toUpperCase() } });
-    if (!game) return reply.status(404).send({ error: "Game not found" });
-    if (game.status !== "lobby") return reply.status(400).send({ error: "Game already started" });
+  if (!game) return reply.status(404).send({ error: "Game not found" });
+  // Partie unique: autoriser le join même si la partie est en cours
 
     let guestId = (req as any).cookies?.["hm_guest"] as string | undefined;
     if (!guestId) {
@@ -119,10 +116,16 @@ export async function registerGameRoutes(app: FastifyInstance) {
       (reply as any).setCookie?.("hm_guest", guestId, { path: "/", httpOnly: true, sameSite: "lax", maxAge: 60 * 60 * 24 * 365 });
     }
 
+    const trimmed = nickname.trim();
+    const existingByNickname = await prisma.player.findFirst({ where: { gameId: game.id, nickname: { equals: trimmed, mode: 'insensitive' } }, select: { id: true, guestId: true } });
+    const existingByGuest = await prisma.player.findUnique({ where: { gameId_guestId: { gameId: game.id, guestId } }, select: { id: true } });
+    if (existingByNickname && (!existingByGuest || existingByNickname.id !== existingByGuest.id)) {
+      return reply.status(409).send({ error: "Pseudo déjà utilisé dans cette partie" });
+    }
     const player = await prisma.player.upsert({
       where: { gameId_guestId: { gameId: game.id, guestId } },
-      update: { nickname: nickname.trim() },
-      create: { nickname: nickname.trim(), cash: INITIAL_CASH, netWorth: INITIAL_CASH, gameId: game.id, guestId },
+      update: { nickname: trimmed },
+      create: { nickname: trimmed, cash: INITIAL_CASH, netWorth: INITIAL_CASH, gameId: game.id, guestId },
       select: { id: true },
     });
     (app as any).io?.emit("lobby-update", { type: "joined", gameId: game.id });

@@ -34,6 +34,7 @@ model Player {
   markets    MarketHolding[]
 
   @@unique([gameId, guestId])
+  @@unique([gameId, nickname])
 }
 
 model Game {
