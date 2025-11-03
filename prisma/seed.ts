@@ -43,6 +43,14 @@ function toStateLabel(score: number): "bon" | "moyen" | "à rénover" {
   return "à rénover";
 }
 
+function illustrationForType(t: string): string {
+  const key = t.toLowerCase();
+  if (key.includes("duplex")) return "/images/props/duplex.svg";
+  if (key.includes("triplex")) return "/images/props/triplex.svg";
+  // défaut: maison
+  return "/images/props/maison.svg";
+}
+
 async function seedFromJson(): Promise<number> {
   const file = path.resolve(__dirname, "data", "immeubles_seed.json");
   if (!fs.existsSync(file)) {
@@ -72,7 +80,8 @@ async function seedFromJson(): Promise<number> {
       data: {
         name,
         city: im.ville,
-        imageUrl: "",
+        // Utiliser des illustrations locales par type (maison/duplex/triplex)
+        imageUrl: im.photoUrl && im.photoUrl.startsWith("/") ? im.photoUrl : illustrationForType(im.type),
         description: [
           `Type: ${im.type}, Année: ${im.anneeConstruction}`,
           `Cap rate: ${im.capRate.toFixed(2)}%, Vacance: ${(im.vacance * 100).toFixed(0)}%`,
