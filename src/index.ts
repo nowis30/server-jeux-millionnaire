@@ -75,6 +75,21 @@ async function bootstrap() {
         maxAge: 60 * 60 * 24 * 365, // 1 an
       });
     }
+
+    // CSRF: assurer un token non-HttpOnly disponible côté client pour les requêtes d'écriture
+    const CSRF_COOKIE = "hm_csrf";
+    const csrfExisting = (request as any).cookies?.[CSRF_COOKIE];
+    if (!csrfExisting) {
+      const { nanoid } = await import("nanoid");
+      const token = nanoid();
+      // Non httpOnly pour lecture par le client
+      reply.setCookie(CSRF_COOKIE, token, {
+        path: "/",
+        httpOnly: false,
+        sameSite: "none",
+        secure: true,
+      });
+    }
   });
 
   // Gestionnaire d'erreurs standardisé (Zod -> 400)
@@ -85,6 +100,23 @@ async function bootstrap() {
     }
     req.log.error({ err }, 'Unhandled error');
     return reply.status(500).send({ error: 'Internal Server Error' });
+  });
+
+  // Vérification CSRF pour méthodes non sûres
+  app.addHook("preHandler", async (req, reply) => {
+    const method = (req.method || "GET").toUpperCase();
+    if (["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
+      const url = (req as any).url as string;
+      // Exemptions: auth endpoints
+      if (url.startsWith("/api/auth/login") || url.startsWith("/api/auth/register") || url.startsWith("/api/auth/logout")) {
+        return;
+      }
+      const csrfCookie = (req as any).cookies?.["hm_csrf"];
+      const tokenHeader = (req.headers?.["x-csrf-token"] as string) || (req.headers?.["x-xsrf-token"] as string);
+      if (!csrfCookie || !tokenHeader || tokenHeader !== csrfCookie) {
+        return reply.status(403).send({ error: "CSRF token invalid" });
+      }
+    }
   });
 
   // Routes REST

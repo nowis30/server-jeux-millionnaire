@@ -43,10 +43,12 @@ async function main() {
         const electricityState = pick(stateCycle, i + 2);
         const roofState = pick(stateCycle, i + 3);
 
+        const typeName = units === 1 ? "logement" : units === 2 ? "duplex" : units === 3 ? "triplex" : `${units} logements`;
+        const imageUrl = `/images/immeubles/plex-${units}.svg`;
         return {
             name: `Immeuble #${String(i + 1).padStart(2, "0")}`,
             city,
-            imageUrl: `https://picsum.photos/seed/hmqc${i}/640/360`,
+            imageUrl,
             price,
             baseRent,
             taxes,
@@ -74,8 +76,10 @@ async function main() {
         });
         let updated = 0;
         for (const t of rows) {
-            const desc = `Bel immeuble locatif situé à ${t.city}. ${t.units} logement(s), état plomberie: ${t.plumbingState}, électricité: ${t.electricityState}, toiture: ${t.roofState}. Revenus potentiels stables avec loyer de base ≈ ${Math.round(t.baseRent)}$ par unité.`;
-            await prisma.$executeRaw`UPDATE "PropertyTemplate" SET "description" = ${desc} WHERE "id" = ${t.id}`;
+            const typeName = t.units === 1 ? "logement" : t.units === 2 ? "duplex" : t.units === 3 ? "triplex" : `${t.units} logements`;
+            const desc = `Immeuble ${typeName} à ${t.city}. ${t.units} logement(s), plomberie: ${t.plumbingState}, électricité: ${t.electricityState}, toiture: ${t.roofState}. Loyer de base ≈ ${Math.round(t.baseRent)}$ par unité.`;
+            const imageUrl = `/images/immeubles/plex-${t.units}.svg`;
+            await prisma.$executeRaw`UPDATE "PropertyTemplate" SET "description" = ${desc}, "imageUrl" = ${imageUrl} WHERE "id" = ${t.id}`;
             updated++;
         }
         console.log(`Seed: descriptions (ré)écrites pour ${updated} templates.`);
