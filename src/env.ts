@@ -18,8 +18,11 @@ export const env = {
   NODE_ENV: process.env.NODE_ENV ?? "development",
   JWT_SECRET: process.env.JWT_SECRET ?? "dev-secret-change-me",
   ADMIN_EMAIL: process.env.ADMIN_EMAIL ?? "",
+  ADMIN_VERIFY_SECRET: process.env.ADMIN_VERIFY_SECRET ?? "",
   MIGRATE_ON_BOOT: (process.env.MIGRATE_ON_BOOT ?? "false").toLowerCase() === "true",
   SEED_ON_BOOT: (process.env.SEED_ON_BOOT ?? "false").toLowerCase() === "true",
+  // Permettre temporairement la connexion même si l'email n'est pas vérifié (utile en dev/démo si SMTP absent)
+  SKIP_EMAIL_VERIFICATION: (process.env.SKIP_EMAIL_VERIFICATION ?? "false").toLowerCase() === "true",
   // Autoriser plusieurs origines, séparées par des virgules
   CLIENT_ORIGINS: (process.env.CLIENT_ORIGIN ?? "http://localhost:3000")
     .split(",")

@@ -55,7 +55,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     if (!user) return reply.status(401).send({ error: "Identifiants invalides" });
     const ok = await bcrypt.compare(password, user.passwordHash);
     if (!ok) return reply.status(401).send({ error: "Identifiants invalides" });
-    if (!(user as any).emailVerified) {
+    if (!(user as any).emailVerified && !env.SKIP_EMAIL_VERIFICATION) {
       return reply.status(403).send({ error: "Email non vérifié. Consultez votre boîte de réception ou demandez un nouvel email de vérification." });
     }
     const token = (app as any).jwt.sign({ sub: user.id, email: user.email, isAdmin: user.isAdmin }, { expiresIn: "12h" });
@@ -94,6 +94,21 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     await (prisma as any).emailVerificationToken.create({ data: { userId: user.id, token, expiresAt } });
     const link = `${env.APP_ORIGIN.replace(/\/$/, "")}/verify?token=${encodeURIComponent(token)}`;
     await sendMail({ to: email, subject: "Vérifiez votre adresse email", html: `<p><a href="${link}">${link}</a></p>` });
+    return reply.send({ ok: true });
+  });
+
+  // Endpoint admin temporaire: valider un utilisateur par email avec un secret
+  app.get("/api/auth/admin/verify-user", async (req, reply) => {
+    const q = (req as any).query ?? {};
+    const email = String(q.email || "").toLowerCase().trim();
+    const secret = String(q.secret || "");
+    if (!env.ADMIN_VERIFY_SECRET || secret !== env.ADMIN_VERIFY_SECRET) {
+      return reply.status(403).send({ error: "Forbidden" });
+    }
+    if (!email) return reply.status(400).send({ error: "Email requis" });
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) return reply.status(404).send({ error: "Utilisateur introuvable" });
+    await (prisma as any).user.update({ where: { id: user.id }, data: { emailVerified: true } });
     return reply.send({ ok: true });
   });
 
