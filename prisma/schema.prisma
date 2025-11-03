@@ -56,6 +56,7 @@ model PropertyTemplate {
   name       String
   city       String
   imageUrl   String
+  description String  @default("")
   price      Float
   baseRent   Float
   taxes      Float

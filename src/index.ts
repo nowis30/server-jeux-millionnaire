@@ -11,6 +11,7 @@ import { dailyMarketTick, ensureMarketHistory } from "./services/market";
 import { registerPropertyRoutes } from "./routes/properties";
 import { registerMarketRoutes } from "./routes/markets";
 import { registerListingRoutes } from "./routes/listings";
+import { ensureTemplateListings } from "./services/listings";
 import { prisma } from "./prisma";
 import type { Server as SocketIOServer } from "socket.io";
 import { registerHealthRoutes } from "./routes/health";
@@ -146,6 +147,8 @@ async function bootstrap() {
     for (const g of games) {
       await ensureMarketHistory(g.id, 50);
       await dailyMarketTick(g.id);
+      // rotation d'annonces immobilières issues de la banque
+      await ensureTemplateListings(g.id, 12, 2);
     }
   }, { timezone: env.TIMEZONE });
 

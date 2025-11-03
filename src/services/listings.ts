@@ -1,8 +1,17 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../prisma";
+import { purchaseProperty } from "./property";
 
 export async function listListings(gameId: string) {
-  return prisma.listing.findMany({ where: { gameId }, orderBy: { createdAt: "desc" } });
+  // Inclure détails pour l'affichage (photo/desc via template)
+  return prisma.listing.findMany({
+    where: { gameId },
+    orderBy: { createdAt: "desc" },
+    include: {
+      template: true,
+      holding: { include: { template: true } },
+    },
+  });
 }
 
 export async function createListing(params: {
@@ -66,6 +75,70 @@ export async function acceptListing(listingId: string, buyerId: string) {
     });
   }
 
-  // MVP: pour templateId, on ne crée pas l'actif ici (trop proche d'un achat classique)
-  throw new Error("Listing de template non supporté dans le MVP");
+  // Support des annonces issues de la banque (templateId)
+  if (listing.templateId) {
+    const template = await prisma.propertyTemplate.findUnique({ where: { id: listing.templateId } });
+    if (!template) throw new Error("Template introuvable");
+
+    // Effectuer un achat standard (avec apport par défaut)
+    const holding = await purchaseProperty({
+      gameId: listing.gameId,
+      playerId: buyerId,
+      templateId: listing.templateId,
+    });
+
+    // Débiter le prix n'est pas nécessaire ici: purchaseProperty gère l'apport et la dette
+    await prisma.listing.delete({ where: { id: listingId } });
+    return { status: "ok", holdingId: holding.id, price: listing.price };
+  }
+
+  throw new Error("Type d'annonce non reconnu");
+}
+
+// Assurer un lot d'annonces de templates en rotation pour une partie
+export async function ensureTemplateListings(gameId: string, desiredCount = 12, rotateCount = 2) {
+  // Templates déjà achetés dans la partie
+  const owned = await prisma.propertyHolding.findMany({ where: { gameId }, select: { templateId: true } });
+  const ownedSet = new Set(owned.map((o: { templateId: string }) => o.templateId));
+
+  // Annonces de templates existantes
+  const current = await prisma.listing.findMany({
+    where: { gameId, templateId: { not: null } },
+    orderBy: { createdAt: "asc" },
+  });
+
+  // Retirer quelques plus anciennes pour faire tourner
+  const toRemove = current.slice(0, Math.max(0, Math.min(rotateCount, current.length)));
+  if (toRemove.length) {
+    await prisma.listing.deleteMany({ where: { id: { in: toRemove.map((l: { id: string }) => l.id) } } });
+  }
+
+  // Recompter après suppression
+  const remaining = current.length - toRemove.length;
+  const toAdd = Math.max(0, desiredCount - remaining);
+  if (toAdd === 0) return;
+
+  // Candidats: templates non possédés et non déjà listés
+  const listedTemplateIds = new Set(
+    current
+      .slice(toRemove.length)
+      .map((l: { templateId: string | null }) => l.templateId as string | null)
+      .filter(Boolean) as string[]
+  );
+  const candidates = await prisma.propertyTemplate.findMany({ orderBy: { price: "asc" } });
+  const pool = candidates.filter((t: { id: string }) => !ownedSet.has(t.id) && !listedTemplateIds.has(t.id));
+
+  // Choisir pseudo-aléatoirement
+  for (let i = 0; i < toAdd && i < pool.length; i++) {
+    const idx = Math.floor(Math.random() * pool.length);
+    const t = pool.splice(idx, 1)[0];
+    await prisma.listing.create({
+      data: {
+        gameId,
+        templateId: t.id,
+        price: t.price,
+        type: "fixed",
+      },
+    });
+  }
 }
