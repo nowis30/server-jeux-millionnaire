@@ -1,7 +1,19 @@
 import { Server as SocketIOServer } from "socket.io";
 import type { Server as HTTPServer } from "http";
-import { LeaderboardEntry, HourlyTickEvent } from "@hm/shared";
 import { env } from "./env";
+
+// Types locaux équivalents à ceux qui étaient fournis par @hm/shared
+export interface LeaderboardEntry {
+  playerId: string;
+  nickname: string;
+  netWorth: number;
+}
+
+export interface HourlyTickEvent {
+  gameId: string;
+  at: string; // ISO
+  leaderboard: LeaderboardEntry[];
+}
 
 export function setupSocket(server: HTTPServer) {
   const io = new SocketIOServer(server, {

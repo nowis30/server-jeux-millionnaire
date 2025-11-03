@@ -8,3 +8,5 @@ export const MARKET_ASSETS = ["GOLD", "OIL", "SP500", "TSX"] as const;
 
 // Condition de victoire (valeur nette cible)
 export const WIN_TARGET_NET_WORTH = 10_000_000;
+
+export type MarketSymbol = typeof MARKET_ASSETS[number];

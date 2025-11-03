@@ -1,6 +1,7 @@
 import { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { latestPricesByGame, buyAsset, sellAsset, holdingsByPlayer } from "../services/market";
+import { MARKET_ASSETS, MarketSymbol } from "../shared/constants";
 import { assertGameRunning } from "./util";
 
 export async function registerMarketRoutes(app: FastifyInstance) {
@@ -20,12 +21,16 @@ export async function registerMarketRoutes(app: FastifyInstance) {
 
   app.post("/api/games/:gameId/markets/buy", async (req, reply) => {
     const paramsSchema = z.object({ gameId: z.string() });
-    const bodySchema = z.object({ playerId: z.string(), symbol: z.string(), quantity: z.number().positive() });
+    const bodySchema = z.object({
+      playerId: z.string(),
+      symbol: z.enum(MARKET_ASSETS as unknown as [MarketSymbol, ...MarketSymbol[]]),
+      quantity: z.number().positive(),
+    });
     try {
   const { gameId } = paramsSchema.parse((req as any).params);
   await assertGameRunning(app, gameId);
-      const body = bodySchema.parse((req as any).body);
-      const trade = await buyAsset({ gameId, ...body });
+  const body = bodySchema.parse((req as any).body);
+  const trade = await buyAsset({ gameId, playerId: body.playerId, symbol: body.symbol as MarketSymbol, quantity: body.quantity });
       (app as any).io?.to(`game:${gameId}`).emit("event-feed", {
         type: "market:buy",
         at: new Date().toISOString(),
@@ -44,12 +49,16 @@ export async function registerMarketRoutes(app: FastifyInstance) {
 
   app.post("/api/games/:gameId/markets/sell", async (req, reply) => {
     const paramsSchema = z.object({ gameId: z.string() });
-    const bodySchema = z.object({ playerId: z.string(), symbol: z.string(), quantity: z.number().positive() });
+    const bodySchema = z.object({
+      playerId: z.string(),
+      symbol: z.enum(MARKET_ASSETS as unknown as [MarketSymbol, ...MarketSymbol[]]),
+      quantity: z.number().positive(),
+    });
     try {
   const { gameId } = paramsSchema.parse((req as any).params);
   await assertGameRunning(app, gameId);
-      const body = bodySchema.parse((req as any).body);
-      const trade = await sellAsset({ gameId, ...body });
+  const body = bodySchema.parse((req as any).body);
+  const trade = await sellAsset({ gameId, playerId: body.playerId, symbol: body.symbol as MarketSymbol, quantity: body.quantity });
       (app as any).io?.to(`game:${gameId}`).emit("event-feed", {
         type: "market:sell",
         at: new Date().toISOString(),

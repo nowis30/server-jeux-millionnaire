@@ -1,18 +1,18 @@
 import { Prisma } from "@prisma/client";
-import { MARKET_ASSETS } from "@hm/shared";
+import { MARKET_ASSETS, MarketSymbol } from "../shared/constants";
 import { prisma } from "../prisma";
 import { initialMarketPrice } from "./simulation";
 import { recalcPlayerNetWorth } from "./property";
 
-const VALID_SYMBOLS = new Set(MARKET_ASSETS);
+const VALID_SYMBOLS = new Set<MarketSymbol>(MARKET_ASSETS);
 
-function assertSymbol(symbol: string): asserts symbol is (typeof MARKET_ASSETS)[number] {
-  if (!VALID_SYMBOLS.has(symbol as (typeof MARKET_ASSETS)[number])) {
+function assertSymbol(symbol: string): asserts symbol is MarketSymbol {
+  if (!VALID_SYMBOLS.has(symbol as MarketSymbol)) {
     throw new Error("Actif inconnu");
   }
 }
 
-async function latestPrice(gameId: string, symbol: string) {
+async function latestPrice(gameId: string, symbol: MarketSymbol) {
   const last = await prisma.marketTick.findFirst({ where: { gameId, symbol }, orderBy: { at: "desc" } });
   return {
     price: last?.price ?? initialMarketPrice(symbol),
@@ -22,7 +22,7 @@ async function latestPrice(gameId: string, symbol: string) {
 
 export async function latestPricesByGame(gameId: string) {
   const results = await Promise.all(
-    MARKET_ASSETS.map(async (symbol) => {
+    MARKET_ASSETS.map(async (symbol: MarketSymbol) => {
       const lp = await latestPrice(gameId, symbol);
       return { symbol, price: lp.price, at: lp.at };
     })
@@ -33,7 +33,7 @@ export async function latestPricesByGame(gameId: string) {
 interface TradeInput {
   gameId: string;
   playerId: string;
-  symbol: string;
+  symbol: MarketSymbol;
   quantity: number;
 }
 

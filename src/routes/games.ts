@@ -1,7 +1,7 @@
 import { FastifyInstance } from "fastify";
 import { prisma } from "../prisma";
 import { z } from "zod";
-import { INITIAL_CASH } from "@hm/shared";
+import { INITIAL_CASH } from "../shared/constants";
 import { customAlphabet } from "nanoid";
 
 const codeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
