@@ -3,6 +3,7 @@ import { prisma } from "../prisma";
 import { z } from "zod";
 import { INITIAL_CASH } from "../shared/constants";
 import { customAlphabet } from "nanoid";
+import { requireAdmin } from "./auth";
 
 const codeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const codeGenerator = customAlphabet(codeAlphabet, 6);
@@ -129,7 +130,7 @@ export async function registerGameRoutes(app: FastifyInstance) {
   });
 
   // Démarrer une partie
-  app.post("/api/games/:id/start", async (req, reply) => {
+  app.post("/api/games/:id/start", { preHandler: requireAdmin(app) }, async (req, reply) => {
     const paramsSchema = z.object({ id: z.string() });
     const { id } = paramsSchema.parse((req as any).params);
     const game = await prisma.game.update({ where: { id }, data: { status: "running", startedAt: new Date() } });

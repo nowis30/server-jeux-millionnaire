@@ -16,6 +16,8 @@ export const env = {
   CRON_TICK: process.env.CRON_TICK ?? "0 * * * *",
   TIMEZONE: process.env.TIMEZONE ?? "America/Toronto",
   NODE_ENV: process.env.NODE_ENV ?? "development",
+  JWT_SECRET: process.env.JWT_SECRET ?? "dev-secret-change-me",
+  ADMIN_EMAIL: process.env.ADMIN_EMAIL ?? "",
   // Autoriser plusieurs origines, séparées par des virgules
   CLIENT_ORIGINS: (process.env.CLIENT_ORIGIN ?? "http://localhost:3000")
     .split(",")
