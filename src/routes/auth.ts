@@ -57,7 +57,10 @@ export async function registerAuthRoutes(app: FastifyInstance) {
   // me
   app.get("/api/auth/me", async (req, reply) => {
     try {
-      const token = (req as any).cookies?.["hm_auth"];
+      const authHeader = (req.headers?.["authorization"] as string) || "";
+      const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+      const tokenCookie = (req as any).cookies?.["hm_auth"];
+      const token = bearer || tokenCookie;
       if (!token) return reply.status(401).send({ error: "Unauthenticated" });
       const payload = (app as any).jwt.verify(token) as { sub: string; email: string; isAdmin: boolean; iat?: number };
       // Barrière anti-tokens anciens (même sans exp) : max 12h
