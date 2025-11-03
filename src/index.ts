@@ -7,6 +7,7 @@ import { registerGameRoutes } from "./routes/games";
 import { setupSocket } from "./socket";
 import cron from "node-cron";
 import { hourlyTick, annualUpdate, nightlyRefresh } from "./services/simulation";
+import { dailyMarketTick, ensureMarketHistory } from "./services/market";
 import { registerPropertyRoutes } from "./routes/properties";
 import { registerMarketRoutes } from "./routes/markets";
 import { registerListingRoutes } from "./routes/listings";
@@ -134,6 +135,17 @@ async function bootstrap() {
       );
 
       // Mode sans fin: pas de condition de fin, la partie continue indéfiniment.
+    }
+  }, { timezone: env.TIMEZONE });
+
+  // Cron marché: 7 ticks par heure (~toutes les 8-9 minutes)
+  const sevenPerHour = "0,8,17,25,34,42,51 * * * *";
+  cron.schedule(sevenPerHour, async () => {
+    app.log.info("[cron] market daily tick (x7/h)");
+    const games = await prisma.game.findMany({ where: { status: "running" } }).catch(() => []);
+    for (const g of games) {
+      await ensureMarketHistory(g.id, 50);
+      await dailyMarketTick(g.id);
     }
   }, { timezone: env.TIMEZONE });
 
