@@ -1,5 +1,5 @@
 import { prisma } from "../prisma";
-import { MARKET_ASSETS, ANNUAL_WEEKS, WIN_TARGET_NET_WORTH } from "@hm/shared";
+import { MARKET_ASSETS, ANNUAL_WEEKS, WIN_TARGET_NET_WORTH } from "../shared/constants";
 
 // Helpers
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));

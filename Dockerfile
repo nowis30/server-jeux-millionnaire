@@ -1,23 +1,18 @@
-# Build server with monorepo context
-FROM node:20-alpine AS base
+FROM node:20-alpine
+
+# Dossier de travail dans le conteneur
 WORKDIR /app
 
-# Copy root and workspace manifests
+# Installer les dépendances (inclut devDependencies pour la compilation)
 COPY package*.json ./
-COPY shared/package*.json ./shared/
-COPY server/package*.json ./server/
-
 RUN npm ci
 
-# Copy sources
-COPY shared ./shared
-COPY server ./server
-
-WORKDIR /app/server
+# Copier le code source du serveur
+COPY . .
 
 ENV NODE_ENV=production
 
-# Generate Prisma client and build
+# Générer le client Prisma et construire le code TypeScript
 RUN npm run prisma:generate && npm run build
 
 EXPOSE 3001
