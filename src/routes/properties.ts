@@ -9,8 +9,18 @@ export async function registerPropertyRoutes(app: FastifyInstance) {
     const querySchema = z.object({ gameId: z.string().optional() });
     const { gameId } = querySchema.parse((req as any).query ?? {});
 
+    // Filtre pour exclure anciens templates avec photos non désirées
+    const excludeOld = {
+      NOT: {
+        OR: [
+          { name: { startsWith: "Immeuble #" } },
+          { imageUrl: { startsWith: "https://picsum.photos" } },
+        ],
+      },
+    } as const;
+
     if (!gameId) {
-      const templates = await app.prisma.propertyTemplate.findMany({ orderBy: { price: "asc" } });
+      const templates = await app.prisma.propertyTemplate.findMany({ where: excludeOld as any, orderBy: { price: "asc" } });
       return reply.send({ templates });
     }
 
@@ -18,12 +28,12 @@ export async function registerPropertyRoutes(app: FastifyInstance) {
       where: { gameId },
       select: { templateId: true },
     });
-    const purchasedIds = Array.from(new Set(purchased.map((p) => p.templateId)));
+    const purchasedIds = Array.from(new Set(purchased.map((p: { templateId: string }) => p.templateId)));
 
-    const templates = await app.prisma.propertyTemplate.findMany({
-      where: purchasedIds.length ? { id: { notIn: purchasedIds } } : {},
-      orderBy: { price: "asc" },
-    });
+    const where = purchasedIds.length
+      ? { AND: [excludeOld as any, { id: { notIn: purchasedIds } }] }
+      : (excludeOld as any);
+    const templates = await app.prisma.propertyTemplate.findMany({ where, orderBy: { price: "asc" } });
     return reply.send({ templates });
   });
 

@@ -125,7 +125,17 @@ export async function ensureTemplateListings(gameId: string, desiredCount = 12, 
       .map((l: { templateId: string | null }) => l.templateId as string | null)
       .filter(Boolean) as string[]
   );
-  const candidates = await prisma.propertyTemplate.findMany({ orderBy: { price: "asc" } });
+  const candidates = await prisma.propertyTemplate.findMany({
+    where: {
+      NOT: {
+        OR: [
+          { name: { startsWith: "Immeuble #" } },
+          { imageUrl: { startsWith: "https://picsum.photos" } },
+        ],
+      },
+    },
+    orderBy: { price: "asc" },
+  });
   const pool = candidates.filter((t: { id: string }) => !ownedSet.has(t.id) && !listedTemplateIds.has(t.id));
 
   // Choisir pseudo-aléatoirement

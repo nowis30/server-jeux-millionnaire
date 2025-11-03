@@ -72,7 +72,7 @@ async function seedFromJson(): Promise<number> {
       data: {
         name,
         city: im.ville,
-        imageUrl: im.photoUrl,
+        imageUrl: "",
         description: [
           `Type: ${im.type}, Année: ${im.anneeConstruction}`,
           `Cap rate: ${im.capRate.toFixed(2)}%, Vacance: ${(im.vacance * 100).toFixed(0)}%`,
@@ -122,7 +122,7 @@ async function seedGenerated(minTotal = 50): Promise<number> {
     return {
       name: `Immeuble #${String(i + 1).padStart(2, "0")}`,
       city,
-      imageUrl: `https://picsum.photos/seed/hmqc${i}/640/360`,
+      imageUrl: "",
       description: `Bel immeuble locatif situé à ${city}. ${units} logement(s), état plomberie: ${plumbingState}, électricité: ${electricityState}, toiture: ${roofState}. Revenus potentiels stables avec loyer de base ≈ ${Math.round(baseRent)}$ par unité.`,
       price,
       baseRent,
