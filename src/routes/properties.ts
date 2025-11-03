@@ -9,14 +9,10 @@ export async function registerPropertyRoutes(app: FastifyInstance) {
     const querySchema = z.object({ gameId: z.string().optional() });
     const { gameId } = querySchema.parse((req as any).query ?? {});
 
-    // Filtre pour exclure anciens templates avec photos non désirées
+    // Filtre pour exclure uniquement les anciennes photos distantes non désirées
+    // On autorise désormais les templates "Immeuble #" (générés) qui utilisent des illustrations locales
     const excludeOld = {
-      NOT: {
-        OR: [
-          { name: { startsWith: "Immeuble #" } },
-          { imageUrl: { startsWith: "https://picsum.photos" } },
-        ],
-      },
+      NOT: { imageUrl: { startsWith: "https://picsum.photos" } },
     } as const;
 
     if (!gameId) {

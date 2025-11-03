@@ -127,12 +127,8 @@ export async function ensureTemplateListings(gameId: string, desiredCount = 12, 
   );
   const candidates = await prisma.propertyTemplate.findMany({
     where: {
-      NOT: {
-        OR: [
-          { name: { startsWith: "Immeuble #" } },
-          { imageUrl: { startsWith: "https://picsum.photos" } },
-        ],
-      },
+      // N'exclure que les anciennes photos distantes; garder les templates générés "Immeuble #"
+      NOT: { imageUrl: { startsWith: "https://picsum.photos" } },
     },
     orderBy: { price: "asc" },
   });
