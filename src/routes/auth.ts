@@ -147,7 +147,8 @@ export async function registerAuthRoutes(app: FastifyInstance) {
   });
 
   // Endpoint admin: seed des PropertyTemplate depuis JSON + génération jusqu'à min=50
-  app.post("/api/admin/seed-templates", async (req, reply) => {
+  // Supporte GET et POST (GET pour éviter CSRF lorsqu'on déclenche depuis un outil sans cookie)
+  async function handleSeedTemplates(req: any, reply: any) {
     const q = (req as any).query ?? {};
     const secret = String(q.secret || "");
     if (!env.ADMIN_VERIFY_SECRET || secret !== env.ADMIN_VERIFY_SECRET) {
@@ -161,7 +162,9 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       req.log.error({ err: e }, "seed-templates failed");
       return reply.status(500).send({ error: "Seed failed" });
     }
-  });
+  }
+  app.post("/api/admin/seed-templates", handleSeedTemplates);
+  app.get("/api/admin/seed-templates", handleSeedTemplates);
 
   // me
   app.get("/api/auth/me", async (req, reply) => {
