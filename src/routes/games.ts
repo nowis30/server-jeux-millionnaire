@@ -183,6 +183,32 @@ export async function registerGameRoutes(app: FastifyInstance) {
     return reply.send({ id, status: "running", restartedAt: new Date().toISOString() });
   });
 
+  // Supprimer un joueur (admin) et toutes ses données liées à la partie
+  app.delete("/api/games/:id/players/:playerId", { preHandler: requireAdmin(app) }, async (req, reply) => {
+    const paramsSchema = z.object({ id: z.string(), playerId: z.string() });
+    const { id, playerId } = paramsSchema.parse((req as any).params);
+    const player = await prisma.player.findUnique({ where: { id: playerId } });
+    if (!player || player.gameId !== id) return reply.status(404).send({ error: "Player not found" });
+
+    await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      // Récupérer les holdings du joueur pour nettoyer les annonces liées à ces holdings
+  const ph = await tx.propertyHolding.findMany({ where: { gameId: id, playerId }, select: { id: true } });
+  const holdingIds = ph.map((h: { id: string }) => h.id);
+      if (holdingIds.length > 0) {
+        await tx.listing.deleteMany({ where: { OR: [{ sellerId: playerId }, { holdingId: { in: holdingIds } }] } });
+        await tx.repairEvent.deleteMany({ where: { holding: { id: { in: holdingIds } } } });
+        await tx.refinanceLog.deleteMany({ where: { holding: { id: { in: holdingIds } } } });
+      } else {
+        await tx.listing.deleteMany({ where: { sellerId: playerId } });
+      }
+      await tx.marketHolding.deleteMany({ where: { gameId: id, playerId } });
+      await tx.propertyHolding.deleteMany({ where: { gameId: id, playerId } });
+      await tx.player.delete({ where: { id: playerId } });
+    });
+    (app as any).io?.emit("lobby-update", { type: "player-removed", gameId: id, playerId });
+    return reply.send({ ok: true });
+  });
+
   // État de la partie
   app.get("/api/games/:id/state", async (req, reply) => {
     const paramsSchema = z.object({ id: z.string() });
