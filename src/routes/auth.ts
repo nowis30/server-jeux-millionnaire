@@ -4,6 +4,7 @@ import { prisma } from "../prisma";
 import bcrypt from "bcryptjs";
 import { env } from "../env";
 import { nanoid } from "nanoid";
+import { sendMail } from "../services/mailer";
 
 const RegisterSchema = z.object({
   email: z.string().email(),
@@ -95,6 +96,48 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     }
     return reply.send({ csrf: token });
   });
+
+  // Demander un reset de mot de passe (envoi d'email)
+  app.post("/api/auth/request-reset", async (req, reply) => {
+    const body = (req as any).body ?? {};
+    const email = String(body.email || "").toLowerCase().trim();
+    if (!email) return reply.status(400).send({ error: "Email requis" });
+    const user = await prisma.user.findUnique({ where: { email } });
+    // Toujours répondre 200 pour ne pas révéler l'existence d'un compte
+    if (!user) return reply.send({ ok: true });
+
+    const token = nanoid();
+    const expiresAt = new Date(Date.now() + 1000 * 60 * 30); // 30 min
+    // Utiliser any pour compatibilité si Prisma Client non régénéré
+    await (prisma as any).passwordResetToken.create({
+      data: { userId: user.id, token, expiresAt },
+    });
+    const link = `${env.APP_ORIGIN.replace(/\/$/, "")}/reset?token=${encodeURIComponent(token)}`;
+    await sendMail({
+      to: email,
+      subject: "Réinitialisation de votre mot de passe",
+      html: `<p>Bonjour,</p><p>Pour réinitialiser votre mot de passe, cliquez sur le lien suivant (valide 30 minutes):</p><p><a href="${link}">${link}</a></p>`,
+    });
+    return reply.send({ ok: true });
+  });
+
+  // Effectuer le reset avec le token
+  app.post("/api/auth/reset", async (req, reply) => {
+    const body = (req as any).body ?? {};
+    const token = String(body.token || "").trim();
+    const newPassword = String(body.password || "");
+    if (!token || newPassword.length < 6) return reply.status(400).send({ error: "Paramètres invalides" });
+    const rec = await (prisma as any).passwordResetToken.findUnique({ where: { token } });
+    if (!rec || rec.usedAt || new Date(rec.expiresAt) < new Date()) {
+      return reply.status(400).send({ error: "Token invalide ou expiré" });
+    }
+    const hash = await bcrypt.hash(newPassword, 10);
+    await prisma.$transaction([
+      prisma.user.update({ where: { id: rec.userId }, data: { passwordHash: hash } }),
+      (prisma as any).passwordResetToken.update({ where: { token }, data: { usedAt: new Date() } }),
+    ] as any);
+    return reply.send({ ok: true });
+  });
 }
 
 export function requireAdmin(app: FastifyInstance) {
@@ -104,6 +147,19 @@ export function requireAdmin(app: FastifyInstance) {
       if (!token) return reply.status(401).send({ error: "Unauthenticated" });
       const payload = (app as any).jwt.verify(token) as { sub: string; email: string; isAdmin: boolean };
       if (!payload.isAdmin) return reply.status(403).send({ error: "Forbidden" });
+      (req as any).user = payload;
+    } catch (e) {
+      return reply.status(401).send({ error: "Unauthenticated" });
+    }
+  };
+}
+
+export function requireUser(app: FastifyInstance) {
+  return async function (req: any, reply: any) {
+    try {
+      const token = req.cookies?.["hm_auth"];
+      if (!token) return reply.status(401).send({ error: "Unauthenticated" });
+      const payload = (app as any).jwt.verify(token) as { sub: string; email: string; isAdmin: boolean };
       (req as any).user = payload;
     } catch (e) {
       return reply.status(401).send({ error: "Unauthenticated" });

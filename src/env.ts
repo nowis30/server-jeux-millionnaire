@@ -25,4 +25,12 @@ export const env = {
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean),
+  // SMTP/Reset password
+  SMTP_HOST: process.env.SMTP_HOST ?? "",
+  SMTP_PORT: Number(process.env.SMTP_PORT ?? 587),
+  SMTP_SECURE: (process.env.SMTP_SECURE ?? "false").toLowerCase() === "true",
+  SMTP_USER: process.env.SMTP_USER ?? "",
+  SMTP_PASS: process.env.SMTP_PASS ?? "",
+  MAIL_FROM: process.env.MAIL_FROM ?? "",
+  APP_ORIGIN: process.env.APP_ORIGIN ?? (process.env.CLIENT_ORIGIN?.split(",")[0] || "http://localhost:3000"),
 };
