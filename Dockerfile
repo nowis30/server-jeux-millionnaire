@@ -5,7 +5,8 @@ WORKDIR /app
 
 # Installer les dépendances (inclut devDependencies pour la compilation)
 COPY package*.json ./
-RUN npm ci
+# Utiliser npm install pour générer un lock cohérent en environnement CI
+RUN npm install
 
 # Copier le code source du serveur
 COPY . .
