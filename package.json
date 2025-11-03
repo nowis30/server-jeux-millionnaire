@@ -14,6 +14,7 @@
     "prisma:deploy": "prisma migrate deploy",
     "prisma:migrate": "prisma migrate dev --name init",
     "seed": "tsx prisma/seed.ts",
+    "purge:old": "tsx scripts/purge_old_templates.ts",
     "test:smoke": "tsx tests/listings.smoke.ts",
     "test:smoke:market": "tsx tests/market.smoke.ts"
   },
