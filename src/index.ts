@@ -74,7 +74,8 @@ async function bootstrap() {
       reply.setCookie(COOKIE_NAME, id, {
         path: "/",
         httpOnly: true,
-        sameSite: "lax",
+        sameSite: "none",
+        secure: true,
         maxAge: 60 * 60 * 24 * 365, // 1 an
       });
     }

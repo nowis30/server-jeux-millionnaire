@@ -46,7 +46,7 @@ export async function registerGameRoutes(app: FastifyInstance) {
       if (!guestId) {
         const { nanoid } = await import("nanoid");
         guestId = nanoid();
-        (reply as any).setCookie?.("hm_guest", guestId, { path: "/", httpOnly: true, sameSite: "lax", maxAge: 60 * 60 * 24 * 365 });
+  (reply as any).setCookie?.("hm_guest", guestId, { path: "/", httpOnly: true, sameSite: "none", secure: true, maxAge: 60 * 60 * 24 * 365 });
       }
       // vérifier unicité du pseudo
       const trimmed = hostNickname.trim();
@@ -94,7 +94,7 @@ export async function registerGameRoutes(app: FastifyInstance) {
       // en alignant le cookie invité sur celui déjà associé au joueur.
       playerId = existingByNickname.id;
       if (existingByNickname.guestId && existingByNickname.guestId !== guestId) {
-        (reply as any).setCookie?.("hm_guest", existingByNickname.guestId, { path: "/", httpOnly: true, sameSite: "lax", maxAge: 60 * 60 * 24 * 365 });
+  (reply as any).setCookie?.("hm_guest", existingByNickname.guestId, { path: "/", httpOnly: true, sameSite: "none", secure: true, maxAge: 60 * 60 * 24 * 365 });
       }
     } else {
       const created = await prisma.player.upsert({
@@ -124,7 +124,7 @@ export async function registerGameRoutes(app: FastifyInstance) {
     if (!guestId) {
       const { nanoid } = await import("nanoid");
       guestId = nanoid();
-      (reply as any).setCookie?.("hm_guest", guestId, { path: "/", httpOnly: true, sameSite: "lax", maxAge: 60 * 60 * 24 * 365 });
+  (reply as any).setCookie?.("hm_guest", guestId, { path: "/", httpOnly: true, sameSite: "none", secure: true, maxAge: 60 * 60 * 24 * 365 });
     }
 
   const userEmail = (req as any).user?.email as string;
@@ -135,7 +135,7 @@ export async function registerGameRoutes(app: FastifyInstance) {
     if (existingByNickname) {
       playerId = existingByNickname.id;
       if (existingByNickname.guestId && existingByNickname.guestId !== guestId) {
-        (reply as any).setCookie?.("hm_guest", existingByNickname.guestId, { path: "/", httpOnly: true, sameSite: "lax", maxAge: 60 * 60 * 24 * 365 });
+  (reply as any).setCookie?.("hm_guest", existingByNickname.guestId, { path: "/", httpOnly: true, sameSite: "none", secure: true, maxAge: 60 * 60 * 24 * 365 });
       }
     } else {
       const created = await prisma.player.upsert({
