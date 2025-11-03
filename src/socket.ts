@@ -16,8 +16,21 @@ export interface HourlyTickEvent {
 }
 
 export function setupSocket(server: HTTPServer) {
+  // Aligner la logique CORS Socket.IO sur celle du HTTP (Fastify)
   const io = new SocketIOServer(server, {
-    cors: { origin: env.CLIENT_ORIGINS, credentials: true },
+    cors: {
+      credentials: true,
+      origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+        // autoriser requêtes serveur-à-serveur et outils (origin nul)
+        if (!origin) return callback(null, true);
+        if (env.CLIENT_ORIGINS.includes(origin)) return callback(null, true);
+        // autoriser tous les déploiements Vercel (prod/preview)
+        if (/\.vercel\.app$/.test(origin)) return callback(null, true);
+        // autoriser localhost en dev
+        if (origin.startsWith("http://localhost:")) return callback(null, true);
+        return callback(new Error("Origin not allowed"));
+      },
+    },
   });
 
   io.on("connection", (socket) => {
