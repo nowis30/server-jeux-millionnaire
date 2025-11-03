@@ -1,0 +1,392 @@
+openapi: 3.1.0
+info:
+  title: Heritier Millionnaire API
+  version: 0.1.0
+  description: API pour le jeu de simulation économique multijoueur.
+servers:
+  - url: http://localhost:3001
+paths:
+  /api/games:
+    get:
+      summary: Lister les parties
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+    post:
+      summary: Créer une partie
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                code:
+                  type: string
+                hostNickname:
+                  type: string
+      responses:
+        '200':
+          description: OK
+  /api/games/{id}/join:
+    post:
+      summary: Rejoindre une partie par ID
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nickname]
+              properties:
+                nickname:
+                  type: string
+      responses:
+        '200':
+          description: OK
+  /api/games/code/{code}/join:
+    post:
+      summary: Rejoindre une partie par code
+      parameters:
+        - in: path
+          name: code
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nickname]
+              properties:
+                nickname:
+                  type: string
+      responses:
+        '200':
+          description: OK
+  /api/games/{id}/start:
+    post:
+      summary: Démarrer la simulation
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+  /api/games/{id}/state:
+    get:
+      summary: État de la partie
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+  /api/games/{id}/me:
+    get:
+      summary: Récupérer le joueur courant (cookie invité)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+  /api/properties/templates:
+    get:
+      summary: Lister les templates d'immeubles
+      responses:
+        '200':
+          description: OK
+  /api/games/{gameId}/properties/purchase:
+    post:
+      summary: Acheter un immeuble
+      parameters:
+        - in: path
+          name: gameId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [playerId, templateId]
+              properties:
+                playerId:
+                  type: string
+                templateId:
+                  type: string
+                mortgageRate:
+                  type: number
+                downPaymentPercent:
+                  type: number
+      responses:
+        '201':
+          description: Created
+  /api/games/{gameId}/properties/{holdingId}/refinance:
+    post:
+      summary: Refinancer un bien
+      parameters:
+        - in: path
+          name: gameId
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: holdingId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [newRate]
+              properties:
+                newRate:
+                  type: number
+                cashOutPercent:
+                  type: number
+      responses:
+        '200':
+          description: OK
+  /api/games/{gameId}/properties/{holdingId}/sell:
+    post:
+      summary: Vendre un bien
+      parameters:
+        - in: path
+          name: gameId
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: holdingId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+  /api/games/{gameId}/properties/holdings/{playerId}:
+    get:
+      summary: Lister les biens d'un joueur
+      parameters:
+        - in: path
+          name: gameId
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: playerId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+  /api/games/{gameId}/markets/latest:
+    get:
+      summary: Derniers prix du marché
+      parameters:
+        - in: path
+          name: gameId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+  /api/games/{gameId}/markets/holdings/{playerId}:
+    get:
+      summary: Portefeuille marché du joueur
+      parameters:
+        - in: path
+          name: gameId
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: playerId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+  /api/games/{gameId}/markets/buy:
+    post:
+      summary: Acheter un actif
+      parameters:
+        - in: path
+          name: gameId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [playerId, symbol, quantity]
+              properties:
+                playerId:
+                  type: string
+                symbol:
+                  type: string
+                quantity:
+                  type: number
+      responses:
+        '200':
+          description: OK
+  /api/games/{gameId}/markets/sell:
+    post:
+      summary: Vendre un actif
+      parameters:
+        - in: path
+          name: gameId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [playerId, symbol, quantity]
+              properties:
+                playerId:
+                  type: string
+                symbol:
+                  type: string
+                quantity:
+                  type: number
+      responses:
+        '200':
+          description: OK
+  /api/games/{gameId}/listings:
+    get:
+      summary: Lister les annonces
+      parameters:
+        - in: path
+          name: gameId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+    post:
+      summary: Créer une annonce
+      parameters:
+        - in: path
+          name: gameId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sellerId, price]
+              properties:
+                sellerId:
+                  type: string
+                holdingId:
+                  type: string
+                templateId:
+                  type: string
+                price:
+                  type: number
+      responses:
+        '201':
+          description: Created
+  /api/games/{gameId}/listings/{id}/cancel:
+    post:
+      summary: Annuler une annonce
+      parameters:
+        - in: path
+          name: gameId
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sellerId]
+              properties:
+                sellerId:
+                  type: string
+      responses:
+        '200':
+          description: OK
+  /api/games/{gameId}/listings/{id}/accept:
+    post:
+      summary: Accepter une annonce
+      parameters:
+        - in: path
+          name: gameId
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [buyerId]
+              properties:
+                buyerId:
+                  type: string
+      responses:
+        '200':
+          description: OK
+  /healthz:
+    get:
+      summary: Health check
+      responses:
+        '200':
+          description: OK
