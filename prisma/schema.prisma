@@ -61,6 +61,11 @@ model PropertyTemplate {
   taxes      Float
   insurance  Float
   maintenance Float
+  // Nouvelles méta-infos réalisme (QC)
+  units       Int     @default(1)   // nombre de logements
+  plumbingState   String @default("bon") // bon | moyen | à rénover
+  electricityState String @default("bon")
+  roofState       String @default("bon")
 
   holdings   PropertyHolding[]
   listings   Listing[]
