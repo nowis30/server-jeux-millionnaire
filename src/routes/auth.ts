@@ -29,29 +29,72 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     if (existing) return reply.status(409).send({ error: "Email déjà utilisé" });
     const passwordHash = await bcrypt.hash(password, 10);
   const isAdmin = !!env.ADMIN_EMAIL && email.toLowerCase() === env.ADMIN_EMAIL.toLowerCase();
-  const user = await prisma.user.create({ data: { email, passwordHash, isAdmin } });
-  const token = (app as any).jwt.sign({ sub: user.id, email: user.email, isAdmin: user.isAdmin }, { expiresIn: "12h" });
-    // Auth cookie cross-site: SameSite=None; Secure (session cookie: pas de maxAge)
-    reply.setCookie("hm_auth", token, { path: "/", httpOnly: true, sameSite: "none", secure: true });
-    // CSRF cookie (non httpOnly)
-    const csrf = Math.random().toString(36).slice(2);
-    reply.setCookie("hm_csrf", csrf, { path: "/", httpOnly: false, sameSite: "none", secure: true });
-    return reply.send({ id: user.id, email: user.email, isAdmin: user.isAdmin, token });
+  const user = await (prisma as any).user.create({ data: { email, passwordHash, isAdmin, emailVerified: false } });
+    // Envoyer un email de vérification
+    try {
+      const token = nanoid();
+      const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24); // 24h
+      await (prisma as any).emailVerificationToken.create({ data: { userId: user.id, token, expiresAt } });
+      const link = `${env.APP_ORIGIN.replace(/\/$/, "")}/verify?token=${encodeURIComponent(token)}`;
+      await sendMail({
+        to: email,
+        subject: "Vérifiez votre adresse email",
+        html: `<p>Bienvenue!</p><p>Pour activer votre compte, cliquez sur le lien suivant (valide 24h):</p><p><a href="${link}">${link}</a></p>`,
+      });
+    } catch (e) {
+      app.log.warn({ err: e }, "Envoi email de vérification échoué");
+    }
+    // Pas d'auth tant que non vérifié
+    return reply.send({ ok: true, message: "Compte créé. Vérifiez votre email pour activer le compte." });
   });
 
   // login
   app.post("/api/auth/login", async (req, reply) => {
     const { email, password } = LoginSchema.parse((req as any).body ?? {});
-    const user = await prisma.user.findUnique({ where: { email } });
+  const user = await prisma.user.findUnique({ where: { email } });
     if (!user) return reply.status(401).send({ error: "Identifiants invalides" });
     const ok = await bcrypt.compare(password, user.passwordHash);
     if (!ok) return reply.status(401).send({ error: "Identifiants invalides" });
+    if (!(user as any).emailVerified) {
+      return reply.status(403).send({ error: "Email non vérifié. Consultez votre boîte de réception ou demandez un nouvel email de vérification." });
+    }
     const token = (app as any).jwt.sign({ sub: user.id, email: user.email, isAdmin: user.isAdmin }, { expiresIn: "12h" });
     reply.setCookie("hm_auth", token, { path: "/", httpOnly: true, sameSite: "none", secure: true });
     // rafraîchir CSRF
     const csrf = Math.random().toString(36).slice(2);
     reply.setCookie("hm_csrf", csrf, { path: "/", httpOnly: false, sameSite: "none", secure: true });
     return reply.send({ id: user.id, email: user.email, isAdmin: user.isAdmin, token });
+  });
+
+  // Vérifier email (via token)
+  app.get("/api/auth/verify-email", async (req, reply) => {
+    const token = String(((req as any).query?.token ?? "")).trim();
+    if (!token) return reply.status(400).send({ error: "Token manquant" });
+    const rec = await (prisma as any).emailVerificationToken.findUnique({ where: { token } });
+    if (!rec || rec.usedAt || new Date(rec.expiresAt) < new Date()) {
+      return reply.status(400).send({ error: "Token invalide ou expiré" });
+    }
+    await prisma.$transaction([
+      (prisma as any).user.update({ where: { id: rec.userId }, data: { emailVerified: true } }),
+      (prisma as any).emailVerificationToken.update({ where: { token }, data: { usedAt: new Date() } }),
+    ] as any);
+    return reply.send({ ok: true });
+  });
+
+  // Renvoyer l'email de vérification
+  app.post("/api/auth/resend-verification", async (req, reply) => {
+    const body = (req as any).body ?? {};
+    const email = String(body.email || "").toLowerCase().trim();
+    if (!email) return reply.status(400).send({ error: "Email requis" });
+  const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) return reply.send({ ok: true });
+  if ((user as any).emailVerified) return reply.send({ ok: true });
+    const token = nanoid();
+    const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24);
+    await (prisma as any).emailVerificationToken.create({ data: { userId: user.id, token, expiresAt } });
+    const link = `${env.APP_ORIGIN.replace(/\/$/, "")}/verify?token=${encodeURIComponent(token)}`;
+    await sendMail({ to: email, subject: "Vérifiez votre adresse email", html: `<p><a href="${link}">${link}</a></p>` });
+    return reply.send({ ok: true });
   });
 
   // me

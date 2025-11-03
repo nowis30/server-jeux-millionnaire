@@ -1,6 +1,6 @@
 import { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { latestPricesByGame, buyAsset, sellAsset, holdingsByPlayer, getHistory } from "../services/market";
+import { latestPricesByGame, buyAsset, sellAsset, holdingsByPlayer, getHistory, returnsBySymbol } from "../services/market";
 import { MARKET_ASSETS, MarketSymbol } from "../shared/constants";
 import { assertGameRunning } from "./util";
 
@@ -27,6 +27,17 @@ export async function registerMarketRoutes(app: FastifyInstance) {
     const { years } = querySchema.parse((req as any).query ?? {});
     const data = await getHistory(gameId, symbol as MarketSymbol, years ?? 50);
     return reply.send({ symbol, data });
+  });
+
+  // Rendements par actif (fenêtres: 1h, 1d, 7d, 30d, ytd)
+  app.get("/api/games/:gameId/markets/returns", async (req, reply) => {
+    const paramsSchema = z.object({ gameId: z.string() });
+    const querySchema = z.object({ windows: z.string().optional() });
+    const { gameId } = paramsSchema.parse((req as any).params);
+    const { windows } = querySchema.parse((req as any).query ?? {});
+    const ws = (windows?.split(",").filter(Boolean) as any) ?? undefined;
+    const data = await returnsBySymbol(gameId, ws);
+    return reply.send(data);
   });
 
   app.post("/api/games/:gameId/markets/buy", async (req, reply) => {

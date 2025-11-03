@@ -238,3 +238,56 @@ export async function getHistory(gameId: string, symbol: MarketSymbol, years = 5
   });
   return rows.map((r: { at: Date; price: number }) => ({ at: r.at, price: r.price }));
 }
+
+// --- Rendements par actif sur fenêtres de temps ---
+export type ReturnWindow = "1h" | "1d" | "7d" | "30d" | "ytd";
+
+function windowStartDate(w: ReturnWindow): Date {
+  const now = new Date();
+  const d = new Date(now);
+  switch (w) {
+    case "1h": d.setUTCHours(d.getUTCHours() - 1); break;
+    case "1d": d.setUTCDate(d.getUTCDate() - 1); break;
+    case "7d": d.setUTCDate(d.getUTCDate() - 7); break;
+    case "30d": d.setUTCDate(d.getUTCDate() - 30); break;
+    case "ytd": d.setUTCMonth(0, 1); d.setUTCHours(0,0,0,0); break;
+  }
+  return d;
+}
+
+export async function returnsBySymbol(
+  gameId: string,
+  windows: ReturnWindow[] = ["1d", "7d", "30d", "ytd"]
+) {
+  const now = new Date();
+  const result: Record<MarketSymbol, Record<ReturnWindow, number>> = {} as any;
+
+  for (const symbol of MARKET_ASSETS) {
+    const wret: Partial<Record<ReturnWindow, number>> = {};
+    // Dernier cours (référence de fin)
+    const last = await prisma.marketTick.findFirst({ where: { gameId, symbol }, orderBy: { at: "desc" } });
+    const lastPrice = last?.price ?? initialMarketPrice(symbol);
+    for (const w of windows) {
+      const since = windowStartDate(w);
+      // Trouver le premier tick à partir de la fenêtre (ou le plus proche précédent si aucun)
+      const first = await prisma.marketTick.findFirst({
+        where: { gameId, symbol, at: { gte: since } },
+        orderBy: { at: "asc" },
+      });
+      let basePrice = first?.price;
+      if (!basePrice) {
+        // fallback: prendre le plus récent avant la fenêtre
+        const prev = await prisma.marketTick.findFirst({
+          where: { gameId, symbol, at: { lte: since } },
+          orderBy: { at: "desc" },
+        });
+        basePrice = prev?.price ?? lastPrice;
+      }
+      const ret = basePrice ? (lastPrice / basePrice) - 1 : 0;
+      wret[w] = Number(ret.toFixed(4)) as any;
+    }
+    (result as any)[symbol] = wret;
+  }
+
+  return { asOf: now.toISOString(), windows, returns: result };
+}
