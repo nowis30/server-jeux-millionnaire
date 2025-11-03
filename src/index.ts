@@ -84,8 +84,13 @@ async function bootstrap() {
     io.close();
   });
 
+  const hourlyCron = cron.validate(env.CRON_TICK) ? env.CRON_TICK : "0 * * * *";
+  if (hourlyCron !== env.CRON_TICK) {
+    app.log.warn({ provided: env.CRON_TICK }, "Expression CRON invalide, utilisation du fallback '0 * * * *'");
+  }
+
   // Cron horaire
-  cron.schedule(env.CRON_TICK, async () => {
+  cron.schedule(hourlyCron, async () => {
     app.log.info("[cron] hourlyTick");
     // pour chaque partie en cours
     const games = await prisma.game.findMany({ where: { status: "running" } }).catch(() => []);
@@ -112,7 +117,7 @@ async function bootstrap() {
 
   // Cron annuel (toutes les 52 heures réelles) — approximé ici: toutes les 52 exécutions
   let hourCounter = 0;
-  cron.schedule(env.CRON_TICK, async () => {
+  cron.schedule(hourlyCron, async () => {
     hourCounter++;
     if (hourCounter % 52 === 0) {
       app.log.info("[cron] annualUpdate");
