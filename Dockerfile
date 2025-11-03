@@ -1,10 +1,14 @@
-FROM node:20-alpine
+FROM node:20-bookworm-slim
 
 # Dossier de travail dans le conteneur
 WORKDIR /app
 
-# Les binaires Prisma musl nécessitent libssl 1.1 dans l'image Alpine.
-RUN apk add --no-cache openssl1.1-compat
+## Dépendances runtime
+# Sur Debian (glibc), Prisma utilise les binaires OpenSSL 3.0.
+# On installe openssl et les certificats CA, puis on nettoie l'index APT.
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends openssl ca-certificates \
+	&& rm -rf /var/lib/apt/lists/*
 
 # Installer les dépendances (inclut devDependencies pour la compilation)
 COPY package*.json ./
