@@ -19,6 +19,8 @@ import { registerAuthRoutes } from "./routes/auth";
 import { registerDocs } from "./routes/docs";
 import { execSync } from "child_process";
 import { prisma as prismaClient } from "./prisma";
+import { computeWeeklyMortgage } from "./services/simulation";
+import { registerEconomyRoutes } from "./routes/economy";
 
 async function bootstrap() {
   // Option: exécuter les migrations Prisma au démarrage si demandé
@@ -135,6 +137,7 @@ async function bootstrap() {
   await registerListingRoutes(app);
   await registerHealthRoutes(app);
   await registerAuthRoutes(app);
+  await registerEconomyRoutes(app);
   try {
     await registerDocs(app);
   } catch (e) {
@@ -180,10 +183,11 @@ async function bootstrap() {
     }
   }, { timezone: env.TIMEZONE });
 
-  // Cron marché: 7 ticks par heure (~toutes les 8-9 minutes)
-  const sevenPerHour = "0,8,17,25,34,42,51 * * * *";
-  cron.schedule(sevenPerHour, async () => {
-    app.log.info("[cron] market daily tick (x7/h)");
+  // Cron marché: ~70 ticks par heure (toutes les ~51 secondes)
+  // Remarque: node-cron accepte les secondes (6 champs). 3600/51 ≈ 70,6 ticks/heure.
+  const seventyPerHour = "*/51 * * * * *";
+  cron.schedule(seventyPerHour, async () => {
+    app.log.info("[cron] market daily tick (~70/h)");
     const games = await prisma.game.findMany({ where: { status: "running" } }).catch(() => []);
     for (const g of games) {
       await ensureMarketHistory(g.id, 50);
@@ -209,6 +213,35 @@ async function bootstrap() {
     app.log.info("[cron] nightlyRefresh");
     const games = await prisma.game.findMany({ where: { status: "running" } }).catch(() => []);
     for (const g of games) await nightlyRefresh(g.id);
+  }, { timezone: env.TIMEZONE });
+
+  // Taux hypothécaires variables: le 1er de chaque mois, ajuster de +/-0.25% dans [2%,7%]
+  cron.schedule("0 1 0 1 * *", async () => {
+    app.log.info("[cron] monthly rate step +/-0.25% et MAJ paiements hypothécaires");
+    const games = await prisma.game.findMany({ where: { status: "running" } }).catch(() => []);
+    for (const g of games) {
+      const dir = Math.random() < 0.5 ? -1 : 1;
+      const step = 0.0025 * dir; // 0.25%
+      const prev = (g as any).baseMortgageRate ?? 0.05;
+      const next = Math.max(0.02, Math.min(0.07, prev + step));
+      await (prisma as any).game.update({ where: { id: g.id }, data: { baseMortgageRate: next } });
+      // Appliquer le taux aux holdings (variable) et recalculer le paiement hebdo sur 25 ans basé sur la dette restante
+      const holdings = await prisma.propertyHolding.findMany({ where: { gameId: g.id }, select: { id: true, mortgageDebt: true } });
+      for (const h of holdings) {
+        const weekly = computeWeeklyMortgage(h.mortgageDebt, next);
+        await prisma.propertyHolding.update({ where: { id: h.id }, data: { mortgageRate: next, weeklyPayment: weekly } });
+      }
+    }
+  }, { timezone: env.TIMEZONE });
+
+  // Chaque 1er janvier, choisir l'appréciation annuelle dans [2%,5%] pour l'année
+  cron.schedule("0 5 0 1 1 *", async () => {
+    app.log.info("[cron] yearly appreciation pick [2%,5%]");
+    const games = await prisma.game.findMany({ where: { status: "running" } }).catch(() => []);
+    for (const g of games) {
+      const appr = 0.02 + Math.random() * 0.03; // 2% à 5%
+      await (prisma as any).game.update({ where: { id: g.id }, data: { appreciationAnnual: appr } });
+    }
   }, { timezone: env.TIMEZONE });
 
   await app.listen({ port: env.PORT, host: "0.0.0.0" });

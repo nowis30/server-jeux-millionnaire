@@ -46,6 +46,10 @@ model Game {
   startedAt DateTime?
   updatedAt DateTime @updatedAt
 
+  // Paramètres économiques pilotés par le jeu
+  baseMortgageRate   Float   @default(0.05) // 5% au départ, varie de 0.25%/mois entre 2% et 7%
+  appreciationAnnual Float   @default(0.03) // 3% par défaut, choisie chaque année entre 2% et 5%
+
   players     Player[]
   marketTicks MarketTick[]
   propertyHoldings PropertyHolding[]

@@ -138,6 +138,7 @@ function assetParams(symbol: MarketSymbol) {
     case "TSX": return { driftA: 0.06, volA: 0.16 };
     case "GOLD": return { driftA: 0.04, volA: 0.15 };
     case "OIL": return { driftA: 0.03, volA: 0.35 };
+    case "BONDS": return { driftA: 0.03, volA: 0.06 }; // obligations mondiales: faible volatilité
     default: return { driftA: 0.05, volA: 0.2 } as const;
   }
 }

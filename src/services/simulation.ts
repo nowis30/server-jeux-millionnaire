@@ -81,9 +81,11 @@ export async function hourlyTick(gameId: string) {
 export async function annualUpdate(gameId: string) {
   // Appréciation immobilière et inflation loyers/dépenses
   const holdings = await prisma.propertyHolding.findMany({ where: { gameId }, include: { template: true } });
+  const g = await (prisma as any).game.findUnique({ where: { id: gameId }, select: { appreciationAnnual: true } });
+  const appr = Number(g?.appreciationAnnual ?? 0.03);
   for (const h of holdings) {
-    const appreciation = 0.02 + randn_bm() * 0.03; // ~2% +/- 3%
-    const newValue = Math.max(0, h.currentValue * (1 + appreciation));
+    // Appréciation fixée par le jeu pour l'année, dans [2%,5%]
+    const newValue = Math.max(0, h.currentValue * (1 + appr));
     const inflation = 0.02 + randn_bm() * 0.01;
     const newRent = Math.max(0, h.currentRent * (1 + inflation));
     await prisma.propertyHolding.update({ where: { id: h.id }, data: { currentValue: newValue, currentRent: newRent } });
@@ -167,6 +169,9 @@ export function initialMarketPrice(symbol: string): number {
       return 5000;
     case "TSX":
       return 21000;
+    case "BONDS":
+      // Fonds d'obligations mondiales (valeur indicielle)
+      return 100;
     default:
       return 100;
   }
@@ -175,12 +180,12 @@ export function initialMarketPrice(symbol: string): number {
 function avgWeeklyReturn(symbol: string): number {
   // approx annuel -> hebdo
   const annual =
-    symbol === "GOLD" ? 0.04 : symbol === "OIL" ? 0.03 : symbol === "SP500" ? 0.07 : symbol === "TSX" ? 0.06 : 0.05;
+    symbol === "GOLD" ? 0.04 : symbol === "OIL" ? 0.03 : symbol === "SP500" ? 0.07 : symbol === "TSX" ? 0.06 : symbol === "BONDS" ? 0.03 : 0.05;
   return annual / ANNUAL_WEEKS;
 }
 
 function weeklyVolatility(symbol: string): number {
-  const annualVol = symbol === "OIL" ? 0.35 : symbol === "GOLD" ? 0.15 : symbol === "SP500" ? 0.18 : 0.16;
+  const annualVol = symbol === "OIL" ? 0.35 : symbol === "GOLD" ? 0.15 : symbol === "SP500" ? 0.18 : symbol === "BONDS" ? 0.06 : 0.16;
   // approx: vol hebdo ~ vol annuel / sqrt(52)
   return annualVol / Math.sqrt(ANNUAL_WEEKS);
 }
