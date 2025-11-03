@@ -114,9 +114,15 @@ async function bootstrap() {
       }
       const csrfCookie = (req as any).cookies?.["hm_csrf"];
       const tokenHeader = (req.headers?.["x-csrf-token"] as string) || (req.headers?.["x-xsrf-token"] as string);
-      if (!csrfCookie || !tokenHeader || tokenHeader !== csrfCookie) {
-        return reply.status(403).send({ error: "CSRF token invalid" });
-      }
+      // Si le token correspond au cookie -> OK
+      if (csrfCookie && tokenHeader && tokenHeader === csrfCookie) return;
+      // Tolérance: si l'origine est autorisée et qu'une session utilisateur est présente (hm_auth),
+      // on autorise sans CSRF pour compatibilité avec les navigateurs bloquant les cookies tiers.
+      const origin = (req.headers?.["origin"] as string) || "";
+      const allowed = !origin || env.CLIENT_ORIGINS.includes(origin) || /\.vercel\.app$/.test(origin) || origin.startsWith("http://localhost:");
+      const hasAuth = Boolean((req as any).cookies?.["hm_auth"]);
+      if (allowed && hasAuth) return;
+      return reply.status(403).send({ error: "CSRF token invalid" });
     }
   });
 
