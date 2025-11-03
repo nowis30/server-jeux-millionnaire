@@ -29,14 +29,14 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     if (existing) return reply.status(409).send({ error: "Email déjà utilisé" });
     const passwordHash = await bcrypt.hash(password, 10);
   const isAdmin = !!env.ADMIN_EMAIL && email.toLowerCase() === env.ADMIN_EMAIL.toLowerCase();
-    const user = await prisma.user.create({ data: { email, passwordHash, isAdmin } });
-    const token = (app as any).jwt.sign({ sub: user.id, email: user.email, isAdmin: user.isAdmin }, { expiresIn: "12h" });
+  const user = await prisma.user.create({ data: { email, passwordHash, isAdmin } });
+  const token = (app as any).jwt.sign({ sub: user.id, email: user.email, isAdmin: user.isAdmin }, { expiresIn: "12h" });
     // Auth cookie cross-site: SameSite=None; Secure (session cookie: pas de maxAge)
     reply.setCookie("hm_auth", token, { path: "/", httpOnly: true, sameSite: "none", secure: true });
     // CSRF cookie (non httpOnly)
     const csrf = Math.random().toString(36).slice(2);
     reply.setCookie("hm_csrf", csrf, { path: "/", httpOnly: false, sameSite: "none", secure: true });
-    return reply.send({ id: user.id, email: user.email, isAdmin: user.isAdmin });
+    return reply.send({ id: user.id, email: user.email, isAdmin: user.isAdmin, token });
   });
 
   // login
@@ -51,7 +51,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     // rafraîchir CSRF
     const csrf = Math.random().toString(36).slice(2);
     reply.setCookie("hm_csrf", csrf, { path: "/", httpOnly: false, sameSite: "none", secure: true });
-    return reply.send({ id: user.id, email: user.email, isAdmin: user.isAdmin });
+    return reply.send({ id: user.id, email: user.email, isAdmin: user.isAdmin, token });
   });
 
   // me
@@ -143,9 +143,12 @@ export async function registerAuthRoutes(app: FastifyInstance) {
 export function requireAdmin(app: FastifyInstance) {
   return async function (req: any, reply: any) {
     try {
-      const token = req.cookies?.["hm_auth"];
-      if (!token) return reply.status(401).send({ error: "Unauthenticated" });
-      const payload = (app as any).jwt.verify(token) as { sub: string; email: string; isAdmin: boolean };
+      const authHeader = (req.headers?.["authorization"] as string) || "";
+      const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+      const tokenCookie = req.cookies?.["hm_auth"];
+      const raw = bearer || tokenCookie;
+      if (!raw) return reply.status(401).send({ error: "Unauthenticated" });
+      const payload = (app as any).jwt.verify(raw) as { sub: string; email: string; isAdmin: boolean };
       if (!payload.isAdmin) return reply.status(403).send({ error: "Forbidden" });
       (req as any).user = payload;
     } catch (e) {
@@ -157,9 +160,12 @@ export function requireAdmin(app: FastifyInstance) {
 export function requireUser(app: FastifyInstance) {
   return async function (req: any, reply: any) {
     try {
-      const token = req.cookies?.["hm_auth"];
-      if (!token) return reply.status(401).send({ error: "Unauthenticated" });
-      const payload = (app as any).jwt.verify(token) as { sub: string; email: string; isAdmin: boolean };
+      const authHeader = (req.headers?.["authorization"] as string) || "";
+      const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+      const tokenCookie = req.cookies?.["hm_auth"];
+      const raw = bearer || tokenCookie;
+      if (!raw) return reply.status(401).send({ error: "Unauthenticated" });
+      const payload = (app as any).jwt.verify(raw) as { sub: string; email: string; isAdmin: boolean };
       (req as any).user = payload;
     } catch (e) {
       return reply.status(401).send({ error: "Unauthenticated" });
