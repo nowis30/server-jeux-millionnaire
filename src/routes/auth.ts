@@ -29,20 +29,22 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     if (existing) return reply.status(409).send({ error: "Email déjà utilisé" });
     const passwordHash = await bcrypt.hash(password, 10);
   const isAdmin = !!env.ADMIN_EMAIL && email.toLowerCase() === env.ADMIN_EMAIL.toLowerCase();
-  const user = await (prisma as any).user.create({ data: { email, passwordHash, isAdmin, emailVerified: false } });
-    // Envoyer un email de vérification
-    try {
-      const token = nanoid();
-      const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24); // 24h
-      await (prisma as any).emailVerificationToken.create({ data: { userId: user.id, token, expiresAt } });
-      const link = `${env.APP_ORIGIN.replace(/\/$/, "")}/verify?token=${encodeURIComponent(token)}`;
-      await sendMail({
-        to: email,
-        subject: "Vérifiez votre adresse email",
-        html: `<p>Bienvenue!</p><p>Pour activer votre compte, cliquez sur le lien suivant (valide 24h):</p><p><a href="${link}">${link}</a></p>`,
-      });
-    } catch (e) {
-      app.log.warn({ err: e }, "Envoi email de vérification échoué");
+  const user = await (prisma as any).user.create({ data: { email, passwordHash, isAdmin, emailVerified: isAdmin ? true : false } });
+    // Envoyer un email de vérification uniquement pour les non‑admins
+    if (!isAdmin) {
+      try {
+        const token = nanoid();
+        const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24); // 24h
+        await (prisma as any).emailVerificationToken.create({ data: { userId: user.id, token, expiresAt } });
+        const link = `${env.APP_ORIGIN.replace(/\/$/, "")}/verify?token=${encodeURIComponent(token)}`;
+        await sendMail({
+          to: email,
+          subject: "Vérifiez votre adresse email",
+          html: `<p>Bienvenue!</p><p>Pour activer votre compte, cliquez sur le lien suivant (valide 24h):</p><p><a href="${link}">${link}</a></p>`,
+        });
+      } catch (e) {
+        app.log.warn({ err: e }, "Envoi email de vérification échoué");
+      }
     }
     // Pas d'auth tant que non vérifié
     return reply.send({ ok: true, message: "Compte créé. Vérifiez votre email pour activer le compte." });
@@ -55,7 +57,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     if (!user) return reply.status(401).send({ error: "Identifiants invalides" });
     const ok = await bcrypt.compare(password, user.passwordHash);
     if (!ok) return reply.status(401).send({ error: "Identifiants invalides" });
-    if (!(user as any).emailVerified && !env.SKIP_EMAIL_VERIFICATION) {
+    if (!(user as any).emailVerified && !user.isAdmin && !env.SKIP_EMAIL_VERIFICATION) {
       return reply.status(403).send({ error: "Email non vérifié. Consultez votre boîte de réception ou demandez un nouvel email de vérification." });
     }
     const token = (app as any).jwt.sign({ sub: user.id, email: user.email, isAdmin: user.isAdmin }, { expiresIn: "12h" });
