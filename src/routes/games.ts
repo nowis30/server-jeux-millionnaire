@@ -1,4 +1,5 @@
 import { FastifyInstance } from "fastify";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "../prisma";
 import { z } from "zod";
 import { INITIAL_CASH } from "../shared/constants";
@@ -87,17 +88,25 @@ export async function registerGameRoutes(app: FastifyInstance) {
     // Refuser doublon de pseudo dans la même partie (insensible à la casse)
     const existingByNickname = await prisma.player.findFirst({ where: { gameId: id, nickname: { equals: trimmed, mode: 'insensitive' } }, select: { id: true, guestId: true } });
     const existingByGuest = await prisma.player.findUnique({ where: { gameId_guestId: { gameId: id, guestId } }, select: { id: true } });
-    if (existingByNickname && (!existingByGuest || existingByNickname.id !== existingByGuest.id)) {
-      return reply.status(409).send({ error: "Pseudo déjà utilisé dans cette partie" });
+    let playerId: string;
+    if (existingByNickname) {
+      // L'utilisateur est authentifié et son pseudo = email. Réutiliser le joueur existant
+      // en alignant le cookie invité sur celui déjà associé au joueur.
+      playerId = existingByNickname.id;
+      if (existingByNickname.guestId && existingByNickname.guestId !== guestId) {
+        (reply as any).setCookie?.("hm_guest", existingByNickname.guestId, { path: "/", httpOnly: true, sameSite: "lax", maxAge: 60 * 60 * 24 * 365 });
+      }
+    } else {
+      const created = await prisma.player.upsert({
+        where: { gameId_guestId: { gameId: id, guestId } },
+        update: { nickname: trimmed },
+        create: { nickname: trimmed, cash: INITIAL_CASH, netWorth: INITIAL_CASH, gameId: id, guestId },
+        select: { id: true },
+      });
+      playerId = created.id;
     }
-    const player = await prisma.player.upsert({
-      where: { gameId_guestId: { gameId: id, guestId } },
-      update: { nickname: trimmed },
-      create: { nickname: trimmed, cash: INITIAL_CASH, netWorth: INITIAL_CASH, gameId: id, guestId },
-      select: { id: true },
-    });
     (app as any).io?.emit("lobby-update", { type: "joined", gameId: id });
-    return reply.send({ playerId: player.id, gameId: id, code: game.code });
+    return reply.send({ playerId, gameId: id, code: game.code });
   });
 
   // Rejoindre par code en liant le joueur au cookie invité
@@ -122,17 +131,23 @@ export async function registerGameRoutes(app: FastifyInstance) {
   const trimmed = String(userEmail || "").trim();
     const existingByNickname = await prisma.player.findFirst({ where: { gameId: game.id, nickname: { equals: trimmed, mode: 'insensitive' } }, select: { id: true, guestId: true } });
     const existingByGuest = await prisma.player.findUnique({ where: { gameId_guestId: { gameId: game.id, guestId } }, select: { id: true } });
-    if (existingByNickname && (!existingByGuest || existingByNickname.id !== existingByGuest.id)) {
-      return reply.status(409).send({ error: "Pseudo déjà utilisé dans cette partie" });
+    let playerId: string;
+    if (existingByNickname) {
+      playerId = existingByNickname.id;
+      if (existingByNickname.guestId && existingByNickname.guestId !== guestId) {
+        (reply as any).setCookie?.("hm_guest", existingByNickname.guestId, { path: "/", httpOnly: true, sameSite: "lax", maxAge: 60 * 60 * 24 * 365 });
+      }
+    } else {
+      const created = await prisma.player.upsert({
+        where: { gameId_guestId: { gameId: game.id, guestId } },
+        update: { nickname: trimmed },
+        create: { nickname: trimmed, cash: INITIAL_CASH, netWorth: INITIAL_CASH, gameId: game.id, guestId },
+        select: { id: true },
+      });
+      playerId = created.id;
     }
-    const player = await prisma.player.upsert({
-      where: { gameId_guestId: { gameId: game.id, guestId } },
-      update: { nickname: trimmed },
-      create: { nickname: trimmed, cash: INITIAL_CASH, netWorth: INITIAL_CASH, gameId: game.id, guestId },
-      select: { id: true },
-    });
     (app as any).io?.emit("lobby-update", { type: "joined", gameId: game.id });
-    return reply.send({ playerId: player.id, gameId: game.id, code: game.code });
+    return reply.send({ playerId, gameId: game.id, code: game.code });
   });
 
   // Démarrer une partie
@@ -142,6 +157,30 @@ export async function registerGameRoutes(app: FastifyInstance) {
     const game = await prisma.game.update({ where: { id }, data: { status: "running", startedAt: new Date() } });
     (app as any).io?.emit("lobby-update", { type: "started", gameId: game.id });
     return reply.send({ id: game.id, status: game.status });
+  });
+
+  // Redémarrer une partie (efface les données de la partie) — confirmation requise
+  app.post("/api/games/:id/restart", { preHandler: requireAdmin(app) }, async (req, reply) => {
+    const paramsSchema = z.object({ id: z.string() });
+    const bodySchema = z.object({ confirm: z.boolean().optional() });
+    const { id } = paramsSchema.parse((req as any).params);
+    const { confirm } = bodySchema.parse((req as any).body ?? {});
+    if (!confirm) {
+      return reply.status(400).send({ error: "Cette action va effacer les joueurs, annonces, positions et ticks du marché de la partie. Ajoutez {confirm:true} pour continuer." });
+    }
+    // Effacer proprement les données liées à la partie
+  await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      await tx.listing.deleteMany({ where: { gameId: id } });
+      await tx.repairEvent.deleteMany({ where: { holding: { gameId: id } } });
+      await tx.refinanceLog.deleteMany({ where: { holding: { gameId: id } } });
+      await tx.propertyHolding.deleteMany({ where: { gameId: id } });
+      await tx.marketHolding.deleteMany({ where: { gameId: id } });
+      await tx.marketTick.deleteMany({ where: { gameId: id } });
+      await tx.player.deleteMany({ where: { gameId: id } });
+      await tx.game.update({ where: { id }, data: { status: "running", startedAt: new Date() } });
+    });
+    (app as any).io?.emit("lobby-update", { type: "restarted", gameId: id });
+    return reply.send({ id, status: "running", restartedAt: new Date().toISOString() });
   });
 
   // État de la partie
