@@ -16,6 +16,8 @@
     "seed": "tsx prisma/seed.ts",
     "purge:old": "tsx scripts/purge_old_templates.ts",
   "reset:templates": "tsx scripts/reset_templates.ts",
+    "reset:games": "tsx scripts/reset_games.ts",
+    "renew:verifications": "tsx scripts/renew_verifications.ts",
     "test:smoke": "tsx tests/listings.smoke.ts",
     "test:smoke:market": "tsx tests/market.smoke.ts"
   },

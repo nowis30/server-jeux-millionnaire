@@ -114,6 +114,38 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     return reply.send({ ok: true });
   });
 
+  // Endpoint admin: valider TOUS les utilisateurs non-admin (bulk) avec un secret
+  app.get("/api/auth/admin/verify-all", async (req, reply) => {
+    const q = (req as any).query ?? {};
+    const secret = String(q.secret || "");
+    if (!env.ADMIN_VERIFY_SECRET || secret !== env.ADMIN_VERIFY_SECRET) {
+      return reply.status(403).send({ error: "Forbidden" });
+    }
+    const res = await (prisma as any).user.updateMany({ where: { isAdmin: false }, data: { emailVerified: true } });
+    // On peut au passage nettoyer les tokens de vérification obsolètes
+    await (prisma as any).emailVerificationToken.deleteMany({});
+    return reply.send({ ok: true, verifiedCount: res.count });
+  });
+
+  // Endpoint admin: reset complet des parties (danger) — protégé par secret
+  app.post("/api/admin/reset-games", async (req, reply) => {
+    const q = (req as any).query ?? {};
+    const secret = String(q.secret || "");
+    if (!env.ADMIN_VERIFY_SECRET || secret !== env.ADMIN_VERIFY_SECRET) {
+      return reply.status(403).send({ error: "Forbidden" });
+    }
+    // Supprimer dans un ordre sûr pour respecter les FK
+    const listings = await prisma.listing.deleteMany({});
+    const repairs = await prisma.repairEvent.deleteMany({});
+    const refis = await prisma.refinanceLog.deleteMany({});
+    const holdings = await prisma.propertyHolding.deleteMany({});
+    const ticks = await prisma.marketTick.deleteMany({});
+    const mktHoldings = await prisma.marketHolding.deleteMany({});
+    const players = await prisma.player.deleteMany({});
+    const games = await prisma.game.deleteMany({});
+    return reply.send({ ok: true, removed: { listings: listings.count, repairs: repairs.count, refinanceLogs: refis.count, propertyHoldings: holdings.count, marketTicks: ticks.count, marketHoldings: mktHoldings.count, players: players.count, games: games.count } });
+  });
+
   // me
   app.get("/api/auth/me", async (req, reply) => {
     try {
