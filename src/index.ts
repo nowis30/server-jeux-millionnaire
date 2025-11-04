@@ -264,6 +264,16 @@ async function bootstrap() {
     }
   }, { timezone: env.TIMEZONE });
 
+  // Pré-chauffer l'historique marché si besoin (évite 500 sur les premières requêtes)
+  try {
+    const running = await prisma.game.findMany({ where: { status: "running" } }).catch(() => []);
+    for (const g of running) {
+      await ensureMarketHistory(g.id, 50).catch((e) => app.log.warn({ err: e }, "ensureMarketHistory at boot failed"));
+    }
+  } catch (e) {
+    app.log.warn({ err: e }, "prewarm ensureMarketHistory skipped");
+  }
+
   await app.listen({ port: env.PORT, host: "0.0.0.0" });
 }
 
