@@ -256,16 +256,6 @@ export async function dailyMarketTick(gameId: string) {
         case "TQQQ": step = Math.exp(3 * log(nq)); break;
         case "VFV": step = sp; break;
         case "VDY": step = tx; break;
-        case "AAPL": step = Math.exp(1.2 * log(nq) + noiseSmall * n(symbol)); break;
-        case "MSFT": step = Math.exp(1.1 * log(nq) + noiseSmall * n(symbol)); break;
-        case "AMZN": step = Math.exp(1.3 * log(nq) + noiseSmall * n(symbol)); break;
-        case "META": step = Math.exp(1.4 * log(nq) + noiseSmall * n(symbol)); break;
-        case "GOOGL": step = Math.exp(1.1 * log(nq) + noiseSmall * n(symbol)); break;
-        case "NVDA": step = Math.exp(1.8 * log(nq) + 0.03 * n(symbol)); break;
-        case "TSLA": step = Math.exp(1.8 * log(nq) + 0.03 * n(symbol)); break;
-        case "COST": step = Math.exp(0.9 * log(sp) + noiseSmall * n(symbol)); break;
-        case "XLF": step = Math.exp(1.0 * log(sp) + noiseSmall * n(symbol)); break;
-        case "XLE": step = Math.exp(1.0 * log(sp) + 0.02 * n(symbol)); break;
         case "IWM": step = Math.exp(1.2 * log(sp) + 0.025 * n(symbol)); break;
         default: {
           // fallback: utiliser le driver SP500 avec beta 1 et petit bruit

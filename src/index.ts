@@ -219,7 +219,7 @@ async function bootstrap() {
     app.log.info("[cron] market daily tick (~70/h)");
     const games = await prisma.game.findMany({ where: { status: "running" } }).catch(() => []);
     for (const g of games) {
-      await ensureMarketHistory(g.id, 50);
+  await ensureMarketHistory(g.id, 10);
       await dailyMarketTick(g.id);
       // (désactivé) rotation d'annonces immobilières issues de la banque — on ne conserve que les annonces des joueurs
     }
@@ -276,12 +276,12 @@ async function bootstrap() {
   await app.listen({ port: env.PORT, host: "0.0.0.0" });
   app.log.info({ port: env.PORT }, "HTTP server listening");
 
-  // Pré-chauffer l'historique marché en tâche de fond (ne pas bloquer le port binding Render)
+  // Pré-chauffer l'historique marché (10 ans) en tâche de fond (ne pas bloquer le port binding Render)
   (async () => {
     try {
       const running = await prisma.game.findMany({ where: { status: "running" } }).catch(() => []);
       for (const g of running) {
-        await ensureMarketHistory(g.id, 50).catch((e) => app.log.warn({ err: e }, "ensureMarketHistory background failed"));
+        await ensureMarketHistory(g.id, 10).catch((e) => app.log.warn({ err: e }, "ensureMarketHistory background failed"));
       }
     } catch (e) {
       app.log.warn({ err: e }, "prewarm ensureMarketHistory skipped");
