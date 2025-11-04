@@ -32,6 +32,19 @@ async function bootstrap() {
       console.error("[boot] Prisma migrate deploy failed", e);
     }
   }
+  // Vérification schéma: si certaines tables n'existent pas (ex: MarketTick) et pas de shell Render,
+  // pousser le schéma automatiquement en fallback.
+  try {
+    await prisma.marketTick.count();
+  } catch (e) {
+    try {
+      console.warn("[boot] Prisma schema incomplete — running 'prisma db push' fallback...");
+      execSync("npx prisma db push", { stdio: "inherit" });
+      console.log("[boot] Prisma db push completed.");
+    } catch (e2) {
+      console.error("[boot] Prisma db push failed", e2);
+    }
+  }
   if (env.SEED_ON_BOOT) {
     try {
       console.log("[boot] Running seed script prisma/seed.js...");
