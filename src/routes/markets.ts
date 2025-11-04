@@ -80,11 +80,14 @@ export async function registerMarketRoutes(app: FastifyInstance) {
       return reply.send(data);
     } catch (e) {
       const err = e as any;
-      const message = err?.message || "Internal error";
-      const payload: any = { error: message };
       const { debug } = ((req as any).query ?? {}) as any;
-      if (String(debug) === "1" || debug === true) payload.stack = err?.stack;
-      return reply.status(500).send(payload);
+      // En mode debug, exposer l'erreur en 500 pour investigation
+      if (String(debug) === "1" || debug === true) {
+        return reply.status(500).send({ error: err?.message || "Internal error", stack: err?.stack });
+      }
+      // Dégradation gracieuse: retourner un objet vide en 200 pour ne pas bloquer l'UI
+      const now = new Date().toISOString();
+      return reply.send({ asOf: now, windows: ["1d","7d","30d","ytd"], returns: {} });
     }
   });
 
