@@ -32,6 +32,19 @@ export async function registerMarketRoutes(app: FastifyInstance) {
     return reply.send({ holdings });
   });
 
+  // Diagnostic: dernier prix pour un seul actif (débug production)
+  app.get("/api/games/:gameId/markets/latest-one/:symbol", async (req, reply) => {
+    const paramsSchema = z.object({ gameId: z.string(), symbol: z.enum(MARKET_ASSETS as unknown as [MarketSymbol, ...MarketSymbol[]]) });
+    const { gameId, symbol } = paramsSchema.parse((req as any).params);
+    try {
+      const data = await (req.server as any).prisma.marketTick.findFirst({ where: { gameId, symbol }, orderBy: { at: "desc" } });
+      return reply.send({ symbol, last: data ?? null });
+    } catch (e) {
+      const err = e as any;
+      return reply.status(500).send({ error: err?.message || String(e) });
+    }
+  });
+
   // Historique pour graphiques (jusqu’à 50 ans simulés)
   app.get("/api/games/:gameId/markets/history/:symbol", async (req, reply) => {
     const paramsSchema = z.object({ gameId: z.string(), symbol: z.enum(MARKET_ASSETS as unknown as [MarketSymbol, ...MarketSymbol[]]) });
