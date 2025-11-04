@@ -349,33 +349,56 @@ export async function returnsBySymbol(
   windows: ReturnWindow[] = ["1d", "7d", "30d", "ytd"]
 ) {
   const now = new Date();
+  // 1) Dernier prix par symbole (1 requête)
+  const lastRows = await prisma.$queryRaw<{ symbol: string; price: number }[]>`
+    SELECT DISTINCT ON ("symbol") "symbol", "price"
+    FROM "MarketTick"
+    WHERE "gameId" = ${gameId}
+    ORDER BY "symbol", "at" DESC
+  `;
+  const lastMap = new Map<string, number>();
+  for (const r of lastRows) lastMap.set(r.symbol, Number(r.price));
+
+  // Helper pour une fenêtre: base >= since (1 req) et fallback <= since (1 req)
+  async function basePricesSince(since: Date) {
+    const gteRows = await prisma.$queryRaw<{ symbol: string; price: number }[]>`
+      SELECT DISTINCT ON ("symbol") "symbol", "price"
+      FROM "MarketTick"
+      WHERE "gameId" = ${gameId} AND "at" >= ${since}
+      ORDER BY "symbol", "at" ASC
+    `;
+    const lteRows = await prisma.$queryRaw<{ symbol: string; price: number }[]>`
+      SELECT DISTINCT ON ("symbol") "symbol", "price"
+      FROM "MarketTick"
+      WHERE "gameId" = ${gameId} AND "at" <= ${since}
+      ORDER BY "symbol", "at" DESC
+    `;
+    const gteMap = new Map<string, number>();
+    const lteMap = new Map<string, number>();
+    for (const r of gteRows) gteMap.set(r.symbol, Number(r.price));
+    for (const r of lteRows) lteMap.set(r.symbol, Number(r.price));
+    const base: Record<string, number> = {};
+    for (const sym of MARKET_ASSETS as readonly string[]) {
+      base[sym] = gteMap.get(sym) ?? lteMap.get(sym) ?? lastMap.get(sym) ?? initialMarketPrice(sym);
+    }
+    return base;
+  }
+
   const result: Record<MarketSymbol, Record<ReturnWindow, number>> = {} as any;
+  // Prépare toutes les bases en 2 requêtes par fenêtre
+  const basesByWindow: Record<ReturnWindow, Record<string, number>> = {} as any;
+  for (const w of windows) {
+    basesByWindow[w] = await basePricesSince(windowStartDate(w));
+  }
 
   for (const symbol of MARKET_ASSETS) {
-    const wret: Partial<Record<ReturnWindow, number>> = {};
-    // Dernier cours (référence de fin)
-    const last = await prisma.marketTick.findFirst({ where: { gameId, symbol }, orderBy: { at: "desc" } });
-    const lastPrice = last?.price ?? initialMarketPrice(symbol);
+    const lastPrice = lastMap.get(symbol) ?? initialMarketPrice(symbol);
+    const rec: Partial<Record<ReturnWindow, number>> = {};
     for (const w of windows) {
-      const since = windowStartDate(w);
-      // Trouver le premier tick à partir de la fenêtre (ou le plus proche précédent si aucun)
-      const first = await prisma.marketTick.findFirst({
-        where: { gameId, symbol, at: { gte: since } },
-        orderBy: { at: "asc" },
-      });
-      let basePrice = first?.price;
-      if (!basePrice) {
-        // fallback: prendre le plus récent avant la fenêtre
-        const prev = await prisma.marketTick.findFirst({
-          where: { gameId, symbol, at: { lte: since } },
-          orderBy: { at: "desc" },
-        });
-        basePrice = prev?.price ?? lastPrice;
-      }
-      const ret = basePrice ? (lastPrice / basePrice) - 1 : 0;
-      wret[w] = Number(ret.toFixed(4)) as any;
+      const base = basesByWindow[w][symbol] ?? lastPrice;
+      rec[w] = Number(((lastPrice / base) - 1).toFixed(4)) as any;
     }
-    (result as any)[symbol] = wret;
+    (result as any)[symbol] = rec;
   }
 
   return { asOf: now.toISOString(), windows, returns: result };
