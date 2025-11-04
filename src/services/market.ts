@@ -221,6 +221,32 @@ export async function dailyMarketTick(gameId: string) {
   const steps: Record<string, number> = {};
   const drivers = new Set<MarketSymbol>(["SP500", "QQQ", "TSX", "GLD", "TLT"] as any);
 
+  // Helper: dernier jour ouvré du mois (UTC)
+  function lastBusinessDayOfMonth(d: Date) {
+    const y = d.getUTCFullYear();
+    const m = d.getUTCMonth();
+    // Aller au 1er du mois suivant puis -1 jour => dernier jour calendrier du mois
+    const end = new Date(Date.UTC(y, m + 1, 1));
+    end.setUTCDate(end.getUTCDate() - 1);
+    // Si week-end, reculer au vendredi
+    const wd = end.getUTCDay();
+    if (wd === 6) end.setUTCDate(end.getUTCDate() - 1); // samedi -> vendredi
+    if (wd === 0) end.setUTCDate(end.getUTCDate() - 2); // dimanche -> vendredi
+    end.setUTCHours(0, 0, 0, 0);
+    return end;
+  }
+
+  // Helper: est-ce le dernier jour ouvré d'un trimestre (mars/juin/sept/déc) ?
+  function isQuarterEndBusinessDay(d: Date) {
+    const qMonths = new Set([2, 5, 8, 11]); // 0-based: Mar, Jun, Sep, Dec
+    const month = d.getUTCMonth();
+    if (!qMonths.has(month)) return false;
+    const lbd = lastBusinessDayOfMonth(d);
+    const dd = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+    dd.setUTCHours(0, 0, 0, 0);
+    return dd.getTime() === lbd.getTime();
+  }
+
   for (const symbol of MARKET_ASSETS) {
     const last = await prisma.marketTick.findFirst({ where: { gameId, symbol }, orderBy: { at: "desc" } });
     if (!last) {
@@ -269,17 +295,17 @@ export async function dailyMarketTick(gameId: string) {
     const nextPrice = Number(Math.max(0.01, last.price * step).toFixed(2));
     await prisma.marketTick.create({ data: { gameId, symbol, price: nextPrice, at: nextDate } });
 
-    // Dividendes quotidiens approximatifs (rendement annuel / 252)
+    // Dividendes trimestriels (versement 4x/an, au dernier jour ouvré des mois 03/06/09/12)
     const dividendYieldA = symbol === "SP500" ? 0.018
       : symbol === "TSX" ? 0.03
       : symbol === "VFV" ? 0.018
       : symbol === "VDY" ? 0.04
       : 0;
-    if (dividendYieldA > 0) {
+    if (dividendYieldA > 0 && isQuarterEndBusinessDay(nextDate)) {
       const holdings = await prisma.marketHolding.findMany({ where: { gameId, symbol } });
-      const dailyYield = dividendYieldA / 252;
+      const quarterlyYield = dividendYieldA / 4; // 4 versements par an
       for (const h of holdings) {
-        const amount = Number((h.quantity * nextPrice * dailyYield).toFixed(2));
+        const amount = Number((h.quantity * nextPrice * quarterlyYield).toFixed(2));
         if (amount <= 0) continue;
         await prisma.player.update({ where: { id: h.playerId }, data: { cash: { increment: amount } } });
         // Log DB (pour KPI) — une entrée par joueur et par symbole

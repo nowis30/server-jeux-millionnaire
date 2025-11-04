@@ -5,14 +5,28 @@ import { MARKET_ASSETS, MarketSymbol } from "../shared/constants";
 import { assertGameRunning } from "./util";
 
 export async function registerMarketRoutes(app: FastifyInstance) {
+  // Cache mémoire simple (90s) pour lisser la charge des endpoints marchés
+  const TTL_MS = 90_000; // ~1,5 minute
+  const cacheLatest = new Map<string, { exp: number; data: any }>();
+  const cacheReturns = new Map<string, { exp: number; data: any }>();
+
   app.get("/api/games/:gameId/markets/latest", async (req, reply) => {
     const paramsSchema = z.object({ gameId: z.string() });
     const querySchema = z.object({ debug: z.coerce.boolean().optional() });
     try {
       const { gameId } = paramsSchema.parse((req as any).params);
       const { debug } = querySchema.parse((req as any).query ?? {});
+      // Cache (bypass si debug=1)
+      if (!debug) {
+        const hit = cacheLatest.get(gameId);
+        if (hit && hit.exp > Date.now()) {
+          return reply.send(hit.data);
+        }
+      }
       const prices = await latestPricesByGame(gameId);
-      return reply.send({ prices });
+      const payload = { prices };
+      cacheLatest.set(gameId, { exp: Date.now() + TTL_MS, data: payload });
+      return reply.send(payload);
     } catch (e) {
       const err = e as any;
       const message = err?.message || "Internal error";
@@ -74,9 +88,18 @@ export async function registerMarketRoutes(app: FastifyInstance) {
     const querySchema = z.object({ windows: z.string().optional(), debug: z.coerce.boolean().optional() });
     try {
       const { gameId } = paramsSchema.parse((req as any).params);
-      const { windows } = querySchema.parse((req as any).query ?? {});
+      const { windows, debug } = querySchema.parse((req as any).query ?? {});
       const ws = (windows?.split(",").filter(Boolean) as any) ?? undefined;
+      // Cache clé = gameId + fenêtres
+      const key = `${gameId}|${(ws ?? []).join(',')}`;
+      if (!debug) {
+        const hit = cacheReturns.get(key);
+        if (hit && hit.exp > Date.now()) {
+          return reply.send(hit.data);
+        }
+      }
       const data = await returnsBySymbol(gameId, ws);
+      cacheReturns.set(key, { exp: Date.now() + TTL_MS, data });
       return reply.send(data);
     } catch (e) {
       const err = e as any;
