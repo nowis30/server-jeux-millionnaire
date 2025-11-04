@@ -272,17 +272,21 @@ async function bootstrap() {
     }
   }, { timezone: env.TIMEZONE });
 
-  // Pré-chauffer l'historique marché si besoin (évite 500 sur les premières requêtes)
-  try {
-    const running = await prisma.game.findMany({ where: { status: "running" } }).catch(() => []);
-    for (const g of running) {
-      await ensureMarketHistory(g.id, 50).catch((e) => app.log.warn({ err: e }, "ensureMarketHistory at boot failed"));
-    }
-  } catch (e) {
-    app.log.warn({ err: e }, "prewarm ensureMarketHistory skipped");
-  }
-
+  // Écoute HTTP d'abord pour que Render détecte le port rapidement
   await app.listen({ port: env.PORT, host: "0.0.0.0" });
+  app.log.info({ port: env.PORT }, "HTTP server listening");
+
+  // Pré-chauffer l'historique marché en tâche de fond (ne pas bloquer le port binding Render)
+  (async () => {
+    try {
+      const running = await prisma.game.findMany({ where: { status: "running" } }).catch(() => []);
+      for (const g of running) {
+        await ensureMarketHistory(g.id, 50).catch((e) => app.log.warn({ err: e }, "ensureMarketHistory background failed"));
+      }
+    } catch (e) {
+      app.log.warn({ err: e }, "prewarm ensureMarketHistory skipped");
+    }
+  })();
 }
 
 // Type augmentation pour Fastify instance
