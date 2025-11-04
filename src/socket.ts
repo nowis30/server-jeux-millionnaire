@@ -33,6 +33,9 @@ export function setupSocket(server: HTTPServer) {
     },
   });
 
+  // expose io via référence module pour émissions hors routes (ex: simulation)
+  ioRef = io;
+
   io.on("connection", (socket) => {
     const { gameId } = socket.handshake.query as { gameId?: string };
     if (gameId) socket.join(`game:${gameId}`);
@@ -51,4 +54,12 @@ export function setupSocket(server: HTTPServer) {
       io.to(`game:${gameId}`).emit("hourly-tick", payload);
     },
   };
+}
+
+// Référence IO module-scoped + helper pour émettre un event-feed depuis n'importe où
+let ioRef: SocketIOServer | null = null;
+export function sendEventFeed(gameId: string, event: any) {
+  try {
+    ioRef?.to(`game:${gameId}`).emit("event-feed", event);
+  } catch {}
 }

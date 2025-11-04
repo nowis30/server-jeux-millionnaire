@@ -95,4 +95,27 @@ export async function registerMarketRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: message });
     }
   });
+
+  // KPI dividendes reçus: 24h / 7j / YTD
+  app.get("/api/games/:gameId/markets/dividends/:playerId", async (req, reply) => {
+    const paramsSchema = z.object({ gameId: z.string(), playerId: z.string() });
+    const { gameId, playerId } = paramsSchema.parse((req as any).params);
+    const now = new Date();
+    const d24h = new Date(now); d24h.setUTCHours(d24h.getUTCHours() - 24);
+    const d7d = new Date(now); d7d.setUTCDate(d7d.getUTCDate() - 7);
+    const ytd = new Date(now); ytd.setUTCMonth(0, 1); ytd.setUTCHours(0,0,0,0);
+    async function sumSince(since: Date) {
+      const agg = await (req.server as any).prisma.dividendLog.aggregate({
+        _sum: { amount: true },
+        where: { gameId, playerId, at: { gte: since } },
+      }).catch(() => ({ _sum: { amount: 0 } }));
+      return Number(agg?._sum?.amount ?? 0);
+    }
+    const totals = {
+      "24h": await sumSince(d24h),
+      "7d": await sumSince(d7d),
+      "ytd": await sumSince(ytd),
+    } as const;
+    return reply.send({ totals, asOf: now.toISOString() });
+  });
 }

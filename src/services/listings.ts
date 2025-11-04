@@ -3,9 +3,10 @@ import { prisma } from "../prisma";
 import { purchaseProperty } from "./property";
 
 export async function listListings(gameId: string) {
+  // Ne retourner que les annonces publiées par des joueurs (exclure celles "banque/NPC" sans sellerId)
   // Inclure détails pour l'affichage (photo/desc via template)
   return prisma.listing.findMany({
-    where: { gameId },
+    where: { gameId, sellerId: { not: null } },
     orderBy: { createdAt: "desc" },
     include: {
       template: true,

@@ -40,7 +40,10 @@ export async function registerPropertyRoutes(app: FastifyInstance) {
     const holdings = await app.prisma.propertyHolding.findMany({
       where: { gameId, playerId },
       orderBy: { createdAt: "desc" },
-      include: { template: true },
+      include: {
+        template: true,
+        refinanceLogs: { orderBy: { at: "desc" }, take: 10 },
+      },
     });
     return reply.send({ holdings });
   });

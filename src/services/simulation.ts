@@ -1,5 +1,6 @@
 import { prisma } from "../prisma";
 import { MARKET_ASSETS, ANNUAL_WEEKS, WIN_TARGET_NET_WORTH } from "../shared/constants";
+import { sendEventFeed } from "../socket";
 
 // Helpers
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
@@ -58,6 +59,26 @@ export async function hourlyTick(gameId: string) {
       delta += 0; // pas de cash réalisé automatiquement
     }
 
+    // Appliquer intérêt débiteur en cas de solde négatif (marge à taux majoré)
+    const baseRate = Number((game as any).baseMortgageRate ?? 0.05);
+    const marginAnnualRate = Math.max(0, baseRate + 0.05);
+    const cashAfter = p.cash + delta;
+    let interestCharge = 0;
+    if (cashAfter < 0) {
+      // Intérêt hebdo sur le découvert
+      const weeklyRate = marginAnnualRate / ANNUAL_WEEKS;
+      interestCharge = Math.abs(cashAfter) * weeklyRate;
+      delta -= interestCharge;
+      // événement feed (transparence coûts)
+      sendEventFeed(gameId, {
+        type: "cash:margin-interest",
+        at: new Date().toISOString(),
+        gameId,
+        playerId: p.id,
+        amount: interestCharge,
+        rate: marginAnnualRate,
+      });
+    }
     await prisma.player.update({ where: { id: p.id }, data: { cash: p.cash + delta } });
   }
 

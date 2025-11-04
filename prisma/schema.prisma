@@ -157,6 +157,17 @@ model MarketTick {
   at       DateTime @default(now())
 }
 
+model DividendLog {
+  id        String   @id @default(cuid())
+  game      Game     @relation(fields: [gameId], references: [id])
+  gameId    String
+  player    Player   @relation(fields: [playerId], references: [id])
+  playerId  String
+  symbol    String
+  amount    Float
+  at        DateTime @default(now())
+}
+
 model PasswordResetToken {
   id        String   @id @default(cuid())
   user      User     @relation(fields: [userId], references: [id])

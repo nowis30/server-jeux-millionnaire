@@ -11,7 +11,6 @@ import { dailyMarketTick, ensureMarketHistory } from "./services/market";
 import { registerPropertyRoutes } from "./routes/properties";
 import { registerMarketRoutes } from "./routes/markets";
 import { registerListingRoutes } from "./routes/listings";
-import { ensureTemplateListings } from "./services/listings";
 import { prisma } from "./prisma";
 import type { Server as SocketIOServer } from "socket.io";
 import { registerHealthRoutes } from "./routes/health";
@@ -145,6 +144,14 @@ async function bootstrap() {
     app.log.warn({ err: e }, "Swagger non chargé — démarrage sans /docs");
   }
 
+  // Nettoyage au démarrage: supprimer les annonces NPC (templates sans vendeur)
+  try {
+    const del = await prisma.listing.deleteMany({ where: { sellerId: null, templateId: { not: null } } });
+    if (del.count > 0) app.log.info({ count: del.count }, "Suppression des annonces NPC au démarrage");
+  } catch (e) {
+    app.log.warn({ err: e }, "Échec du nettoyage des annonces NPC au démarrage");
+  }
+
   // Socket.IO attaché au server HTTP
   const { io, emitLeaderboard } = setupSocket(app.server);
   app.decorate("io", io as SocketIOServer);
@@ -193,8 +200,7 @@ async function bootstrap() {
     for (const g of games) {
       await ensureMarketHistory(g.id, 50);
       await dailyMarketTick(g.id);
-      // rotation d'annonces immobilières issues de la banque
-      await ensureTemplateListings(g.id, 12, 2);
+      // (désactivé) rotation d'annonces immobilières issues de la banque — on ne conserve que les annonces des joueurs
     }
   }, { timezone: env.TIMEZONE });
 

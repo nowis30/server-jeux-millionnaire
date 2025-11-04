@@ -3,6 +3,7 @@ import { MARKET_ASSETS, MarketSymbol } from "../shared/constants";
 import { prisma } from "../prisma";
 import { initialMarketPrice } from "./simulation";
 import { recalcPlayerNetWorth } from "./property";
+import { sendEventFeed } from "../socket";
 
 const VALID_SYMBOLS = new Set<MarketSymbol>(MARKET_ASSETS);
 
@@ -206,6 +207,8 @@ export async function ensureMarketHistory(gameId: string, years = 50) {
 
 export async function dailyMarketTick(gameId: string) {
   // Avance d'un "jour de bourse" en ajoutant le jour suivant basé sur la dernière valeur
+  // Agrégation des dividendes par joueur (réduit le bruit d'événements)
+  const totals = new Map<string, { amount: number; details: Record<string, number> }>();
   for (const symbol of MARKET_ASSETS) {
     const last = await prisma.marketTick.findFirst({ where: { gameId, symbol }, orderBy: { at: "desc" } });
     if (!last) {
@@ -225,6 +228,38 @@ export async function dailyMarketTick(gameId: string) {
     if (nextDate.getUTCDay() === 6) nextDate.setUTCDate(nextDate.getUTCDate() + 2);
     if (nextDate.getUTCDay() === 0) nextDate.setUTCDate(nextDate.getUTCDate() + 1);
     await prisma.marketTick.create({ data: { gameId, symbol, price: nextPrice, at: nextDate } });
+
+    // Dividendes quotidiens approximatifs (rendement annuel / 252)
+    const dividendYieldA = symbol === "SP500" ? 0.018 : symbol === "TSX" ? 0.03 : 0; // ~1.8% S&P; ~3% TSX
+    if (dividendYieldA > 0) {
+      const holdings = await prisma.marketHolding.findMany({ where: { gameId, symbol } });
+      const dailyYield = dividendYieldA / 252;
+      for (const h of holdings) {
+        const amount = Number((h.quantity * nextPrice * dailyYield).toFixed(2));
+        if (amount <= 0) continue;
+        await prisma.player.update({ where: { id: h.playerId }, data: { cash: { increment: amount } } });
+        // Log DB (pour KPI) — une entrée par joueur et par symbole
+        await (prisma as any).dividendLog.create({ data: { gameId, playerId: h.playerId, symbol, amount } });
+        // Agréger pour event-feed plus tard
+        const row = totals.get(h.playerId) ?? { amount: 0, details: {} };
+        row.amount += amount;
+        row.details[symbol] = (row.details[symbol] ?? 0) + amount;
+        totals.set(h.playerId, row);
+      }
+    }
+  }
+
+  // Émettre un événement agrégé par joueur et recalculer la valeur nette une seule fois par joueur
+  for (const [playerId, info] of totals.entries()) {
+    sendEventFeed(gameId, {
+      type: "market:dividend-agg",
+      at: new Date().toISOString(),
+      gameId,
+      playerId,
+      amount: Number(info.amount.toFixed(2)),
+      details: info.details,
+    });
+    await recalcPlayerNetWorth(gameId, playerId);
   }
 }
 
