@@ -182,17 +182,46 @@ export async function nightlyRefresh(gameId: string) {
 // --- Utilities marché ---
 export function initialMarketPrice(symbol: string): number {
   switch (symbol) {
-    case "GOLD":
-      return 2000;
-    case "OIL":
-      return 80;
     case "SP500":
       return 5000;
+    case "QQQ":
+      return 450;
     case "TSX":
       return 21000;
-    case "BONDS":
-      // Fonds d'obligations mondiales (valeur indicielle)
+    case "GLD":
+      return 190;
+    case "TLT":
+      return 90;
+    case "UPRO":
+      return 80;
+    case "TQQQ":
+      return 60;
+    case "VFV":
       return 100;
+    case "VDY":
+      return 40;
+    case "AAPL":
+      return 180;
+    case "MSFT":
+      return 400;
+    case "AMZN":
+      return 170;
+    case "META":
+      return 320;
+    case "GOOGL":
+      return 140;
+    case "NVDA":
+      return 600;
+    case "TSLA":
+      return 250;
+    case "COST":
+      return 550;
+    case "XLF":
+      return 37;
+    case "XLE":
+      return 90;
+    case "IWM":
+      return 200;
     default:
       return 100;
   }
@@ -201,12 +230,22 @@ export function initialMarketPrice(symbol: string): number {
 function avgWeeklyReturn(symbol: string): number {
   // approx annuel -> hebdo
   const annual =
-    symbol === "GOLD" ? 0.04 : symbol === "OIL" ? 0.03 : symbol === "SP500" ? 0.07 : symbol === "TSX" ? 0.06 : symbol === "BONDS" ? 0.03 : 0.05;
+    symbol === "SP500" ? 0.07
+    : symbol === "QQQ" ? 0.09
+    : symbol === "TSX" ? 0.06
+    : symbol === "GLD" ? 0.04
+    : symbol === "TLT" ? 0.03
+    : 0.05;
   return annual / ANNUAL_WEEKS;
 }
 
 function weeklyVolatility(symbol: string): number {
-  const annualVol = symbol === "OIL" ? 0.35 : symbol === "GOLD" ? 0.15 : symbol === "SP500" ? 0.18 : symbol === "BONDS" ? 0.06 : 0.16;
+  const annualVol = symbol === "GLD" ? 0.15
+    : symbol === "SP500" ? 0.18
+    : symbol === "QQQ" ? 0.25
+    : symbol === "TSX" ? 0.16
+    : symbol === "TLT" ? 0.12
+    : 0.2;
   // approx: vol hebdo ~ vol annuel / sqrt(52)
   return annualVol / Math.sqrt(ANNUAL_WEEKS);
 }

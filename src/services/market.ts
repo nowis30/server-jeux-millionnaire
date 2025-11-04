@@ -136,10 +136,10 @@ function randn(rng: () => number) {
 function assetParams(symbol: MarketSymbol) {
   switch (symbol) {
     case "SP500": return { driftA: 0.07, volA: 0.18 };
+    case "QQQ": return { driftA: 0.09, volA: 0.25 };
     case "TSX": return { driftA: 0.06, volA: 0.16 };
-    case "GOLD": return { driftA: 0.04, volA: 0.15 };
-    case "OIL": return { driftA: 0.03, volA: 0.35 };
-    case "BONDS": return { driftA: 0.03, volA: 0.06 }; // obligations mondiales: faible volatilité
+    case "GLD": return { driftA: 0.04, volA: 0.15 };
+    case "TLT": return { driftA: 0.03, volA: 0.12 }; // obligations long terme
     default: return { driftA: 0.05, volA: 0.2 } as const;
   }
 }
@@ -209,6 +209,10 @@ export async function dailyMarketTick(gameId: string) {
   // Avance d'un "jour de bourse" en ajoutant le jour suivant basé sur la dernière valeur
   // Agrégation des dividendes par joueur (réduit le bruit d'événements)
   const totals = new Map<string, { amount: number; details: Record<string, number> }>();
+  // Pré-calcul des pas (steps) pour les "drivers" afin d'appliquer corrélations/leviers
+  const steps: Record<string, number> = {};
+  const drivers = new Set<MarketSymbol>(["SP500", "QQQ", "TSX", "GLD", "TLT"] as any);
+
   for (const symbol of MARKET_ASSETS) {
     const last = await prisma.marketTick.findFirst({ where: { gameId, symbol }, orderBy: { at: "desc" } });
     if (!last) {
@@ -216,21 +220,63 @@ export async function dailyMarketTick(gameId: string) {
       await ensureMarketHistory(gameId, 50);
       continue;
     }
-    const { driftA, volA } = assetParams(symbol as MarketSymbol);
-    const driftD = driftA / 252;
-    const volD = volA / Math.sqrt(252);
-    // petit clamp pour éviter sauts extrêmes
-    const step = Math.exp(Math.max(-0.2, Math.min(0.2, driftD + volD * randn(mulberry32(hashString(`${gameId}:${symbol}:${+last.at}`))))));
-    const nextPrice = Number(Math.max(0.01, last.price * step).toFixed(2));
     const nextDate = new Date(last.at);
     nextDate.setUTCDate(nextDate.getUTCDate() + 1);
     // éviter weekend: avancer au lundi si besoin
     if (nextDate.getUTCDay() === 6) nextDate.setUTCDate(nextDate.getUTCDate() + 2);
     if (nextDate.getUTCDay() === 0) nextDate.setUTCDate(nextDate.getUTCDate() + 1);
+
+    let step = 1.0;
+    if (drivers.has(symbol as MarketSymbol)) {
+      const { driftA, volA } = assetParams(symbol as MarketSymbol);
+      const driftD = driftA / 252;
+      const volD = volA / Math.sqrt(252);
+      // bruit déterministe basé sur dernier timestamp
+      step = Math.exp(Math.max(-0.2, Math.min(0.2, driftD + volD * randn(mulberry32(hashString(`${gameId}:${symbol}:${+last.at}`))))));
+      steps[symbol] = step;
+    } else {
+      // Dérivés corrélés
+      const log = (x: number) => Math.log(Math.max(1e-6, x));
+      const n = (s: string) => randn(mulberry32(hashString(`${gameId}:${s}:${+last.at}`)));
+      const noiseSmall = 0.02;
+      const sp = steps["SP500"] ?? 1.0;
+      const nq = steps["QQQ"] ?? 1.0;
+      const tx = steps["TSX"] ?? 1.0;
+
+      switch (symbol) {
+        case "UPRO": step = Math.exp(3 * log(sp)); break;
+        case "TQQQ": step = Math.exp(3 * log(nq)); break;
+        case "VFV": step = sp; break;
+        case "VDY": step = tx; break;
+        case "AAPL": step = Math.exp(1.2 * log(nq) + noiseSmall * n(symbol)); break;
+        case "MSFT": step = Math.exp(1.1 * log(nq) + noiseSmall * n(symbol)); break;
+        case "AMZN": step = Math.exp(1.3 * log(nq) + noiseSmall * n(symbol)); break;
+        case "META": step = Math.exp(1.4 * log(nq) + noiseSmall * n(symbol)); break;
+        case "GOOGL": step = Math.exp(1.1 * log(nq) + noiseSmall * n(symbol)); break;
+        case "NVDA": step = Math.exp(1.8 * log(nq) + 0.03 * n(symbol)); break;
+        case "TSLA": step = Math.exp(1.8 * log(nq) + 0.03 * n(symbol)); break;
+        case "COST": step = Math.exp(0.9 * log(sp) + noiseSmall * n(symbol)); break;
+        case "XLF": step = Math.exp(1.0 * log(sp) + noiseSmall * n(symbol)); break;
+        case "XLE": step = Math.exp(1.0 * log(sp) + 0.02 * n(symbol)); break;
+        case "IWM": step = Math.exp(1.2 * log(sp) + 0.025 * n(symbol)); break;
+        default: {
+          // fallback: utiliser le driver SP500 avec beta 1 et petit bruit
+          step = Math.exp(1.0 * log(sp) + 0.02 * n(symbol));
+        }
+      }
+      // clamp de sécurité
+      step = Math.max(Math.exp(-0.25), Math.min(Math.exp(0.25), step));
+    }
+
+    const nextPrice = Number(Math.max(0.01, last.price * step).toFixed(2));
     await prisma.marketTick.create({ data: { gameId, symbol, price: nextPrice, at: nextDate } });
 
     // Dividendes quotidiens approximatifs (rendement annuel / 252)
-    const dividendYieldA = symbol === "SP500" ? 0.018 : symbol === "TSX" ? 0.03 : 0; // ~1.8% S&P; ~3% TSX
+    const dividendYieldA = symbol === "SP500" ? 0.018
+      : symbol === "TSX" ? 0.03
+      : symbol === "VFV" ? 0.018
+      : symbol === "VDY" ? 0.04
+      : 0;
     if (dividendYieldA > 0) {
       const holdings = await prisma.marketHolding.findMany({ where: { gameId, symbol } });
       const dailyYield = dividendYieldA / 252;
