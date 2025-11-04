@@ -22,13 +22,21 @@ async function latestPrice(gameId: string, symbol: MarketSymbol) {
 }
 
 export async function latestPricesByGame(gameId: string) {
-  // Limiter la pression sur le pool DB: séquentiel (20 requêtes courtes)
-  const out: { symbol: MarketSymbol; price: number; at: Date }[] = [];
-  for (const symbol of MARKET_ASSETS) {
-    const lp = await latestPrice(gameId, symbol as MarketSymbol);
-    out.push({ symbol: symbol as MarketSymbol, price: lp.price, at: lp.at });
-  }
-  return out;
+  // Optimisé PostgreSQL: 1 requête avec DISTINCT ON pour prendre le dernier tick par symbole
+  const rows = await prisma.$queryRaw<{ symbol: string; price: number; at: Date }[]>`
+    SELECT DISTINCT ON ("symbol") "symbol", "price", "at"
+    FROM "MarketTick"
+    WHERE "gameId" = ${gameId}
+    ORDER BY "symbol", "at" DESC
+  `;
+  const map = new Map<string, { price: number; at: Date }>();
+  for (const r of rows) map.set(r.symbol, { price: Number(r.price), at: new Date(r.at) });
+  return MARKET_ASSETS.map((symbol) => {
+    const hit = map.get(symbol as string);
+    if (hit) return { symbol: symbol as MarketSymbol, price: hit.price, at: hit.at };
+    const p = initialMarketPrice(symbol);
+    return { symbol: symbol as MarketSymbol, price: p, at: new Date() };
+  });
 }
 
 interface TradeInput {
