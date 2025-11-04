@@ -7,9 +7,22 @@ import { assertGameRunning } from "./util";
 export async function registerMarketRoutes(app: FastifyInstance) {
   app.get("/api/games/:gameId/markets/latest", async (req, reply) => {
     const paramsSchema = z.object({ gameId: z.string() });
-    const { gameId } = paramsSchema.parse((req as any).params);
-    const prices = await latestPricesByGame(gameId);
-    return reply.send({ prices });
+    const querySchema = z.object({ debug: z.coerce.boolean().optional() });
+    try {
+      const { gameId } = paramsSchema.parse((req as any).params);
+      const { debug } = querySchema.parse((req as any).query ?? {});
+      const prices = await latestPricesByGame(gameId);
+      return reply.send({ prices });
+    } catch (e) {
+      const err = e as any;
+      const message = err?.message || "Internal error";
+      const payload: any = { error: message };
+      const { debug } = ((req as any).query ?? {}) as any;
+      if (String(debug) === "1" || debug === true) {
+        payload.stack = err?.stack;
+      }
+      return reply.status(500).send(payload);
+    }
   });
 
   app.get("/api/games/:gameId/markets/holdings/:playerId", async (req, reply) => {
@@ -32,12 +45,21 @@ export async function registerMarketRoutes(app: FastifyInstance) {
   // Rendements par actif (fenêtres: 1h, 1d, 7d, 30d, ytd)
   app.get("/api/games/:gameId/markets/returns", async (req, reply) => {
     const paramsSchema = z.object({ gameId: z.string() });
-    const querySchema = z.object({ windows: z.string().optional() });
-    const { gameId } = paramsSchema.parse((req as any).params);
-    const { windows } = querySchema.parse((req as any).query ?? {});
-    const ws = (windows?.split(",").filter(Boolean) as any) ?? undefined;
-    const data = await returnsBySymbol(gameId, ws);
-    return reply.send(data);
+    const querySchema = z.object({ windows: z.string().optional(), debug: z.coerce.boolean().optional() });
+    try {
+      const { gameId } = paramsSchema.parse((req as any).params);
+      const { windows } = querySchema.parse((req as any).query ?? {});
+      const ws = (windows?.split(",").filter(Boolean) as any) ?? undefined;
+      const data = await returnsBySymbol(gameId, ws);
+      return reply.send(data);
+    } catch (e) {
+      const err = e as any;
+      const message = err?.message || "Internal error";
+      const payload: any = { error: message };
+      const { debug } = ((req as any).query ?? {}) as any;
+      if (String(debug) === "1" || debug === true) payload.stack = err?.stack;
+      return reply.status(500).send(payload);
+    }
   });
 
   app.post("/api/games/:gameId/markets/buy", async (req, reply) => {
