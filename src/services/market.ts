@@ -22,13 +22,13 @@ async function latestPrice(gameId: string, symbol: MarketSymbol) {
 }
 
 export async function latestPricesByGame(gameId: string) {
-  const results = await Promise.all(
-    MARKET_ASSETS.map(async (symbol: MarketSymbol) => {
-      const lp = await latestPrice(gameId, symbol);
-      return { symbol, price: lp.price, at: lp.at };
-    })
-  );
-  return results;
+  // Limiter la pression sur le pool DB: séquentiel (20 requêtes courtes)
+  const out: { symbol: MarketSymbol; price: number; at: Date }[] = [];
+  for (const symbol of MARKET_ASSETS) {
+    const lp = await latestPrice(gameId, symbol as MarketSymbol);
+    out.push({ symbol: symbol as MarketSymbol, price: lp.price, at: lp.at });
+  }
+  return out;
 }
 
 interface TradeInput {
