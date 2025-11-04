@@ -45,6 +45,19 @@ export async function registerMarketRoutes(app: FastifyInstance) {
     }
   });
 
+  // Diagnostic: agrégat latest (compte et premiers éléments)
+  app.get("/api/games/:gameId/markets/diag-latest", async (req, reply) => {
+    const paramsSchema = z.object({ gameId: z.string() });
+    const { gameId } = paramsSchema.parse((req as any).params);
+    try {
+      const prices = await latestPricesByGame(gameId);
+      return reply.send({ count: prices.length, sample: prices.slice(0, 3) });
+    } catch (e) {
+      const err = e as any;
+      return reply.status(500).send({ error: err?.message || String(e) });
+    }
+  });
+
   // Historique pour graphiques (jusqu’à 50 ans simulés)
   app.get("/api/games/:gameId/markets/history/:symbol", async (req, reply) => {
     const paramsSchema = z.object({ gameId: z.string(), symbol: z.enum(MARKET_ASSETS as unknown as [MarketSymbol, ...MarketSymbol[]]) });
