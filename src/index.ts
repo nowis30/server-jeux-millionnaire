@@ -17,20 +17,22 @@ import { registerHealthRoutes } from "./routes/health";
 import { registerAuthRoutes } from "./routes/auth";
 import { registerDocs } from "./routes/docs";
 import { execSync } from "child_process";
+import path from "path";
 import { prisma as prismaClient } from "./prisma";
 import { computeWeeklyMortgage } from "./services/simulation";
 import { registerEconomyRoutes } from "./routes/economy";
 
 async function bootstrap() {
-  // Option: exécuter les migrations Prisma au démarrage si demandé
-  if (env.MIGRATE_ON_BOOT) {
-    try {
-      console.log("[boot] Running prisma migrate deploy...");
-      execSync("npx prisma migrate deploy", { stdio: "inherit" });
-      console.log("[boot] Prisma migrate deploy done.");
-    } catch (e) {
-      console.error("[boot] Prisma migrate deploy failed", e);
-    }
+  // Exécuter les migrations Prisma au démarrage (idempotent). Utile sur Render sans shell.
+  try {
+    console.log("[boot] Running prisma migrate deploy...");
+    execSync("npx prisma migrate deploy", {
+      stdio: "inherit",
+      cwd: path.resolve(__dirname, ".."),
+    });
+    console.log("[boot] Prisma migrate deploy done.");
+  } catch (e) {
+    console.error("[boot] Prisma migrate deploy failed", e);
   }
   // Vérification schéma: si certaines tables n'existent pas (ex: MarketTick) et pas de shell Render,
   // pousser le schéma automatiquement en fallback.
@@ -39,7 +41,10 @@ async function bootstrap() {
   } catch (e) {
     try {
       console.warn("[boot] Prisma schema incomplete — running 'prisma db push' fallback...");
-      execSync("npx prisma db push", { stdio: "inherit" });
+      execSync("npx prisma db push", {
+        stdio: "inherit",
+        cwd: path.resolve(__dirname, ".."),
+      });
       console.log("[boot] Prisma db push completed.");
     } catch (e2) {
       console.error("[boot] Prisma db push failed", e2);
@@ -48,7 +53,10 @@ async function bootstrap() {
   if (env.SEED_ON_BOOT) {
     try {
       console.log("[boot] Running seed script prisma/seed.js...");
-      execSync("node prisma/seed.js", { stdio: "inherit" });
+      execSync("node prisma/seed.js", {
+        stdio: "inherit",
+        cwd: path.resolve(__dirname, ".."),
+      });
       console.log("[boot] Seed done.");
     } catch (e) {
       console.error("[boot] Seed failed", e);
