@@ -108,10 +108,15 @@ export async function seedTemplatesGenerate(minTotal = 50): Promise<number> {
     const city = pick(QC_CITIES, i);
     const price = 180_000 + (i % 50) * 35_000;
     const units = 1 + (i % 6);
-    const baseRent = clamp(750 + (i % 10) * 85, 700, 2200);
-    const taxes = clamp(2_000 + (i % 50) * 180, 1_500, 9_000);
-    const insurance = clamp(700 + (i % 50) * 45, 500, 3_000);
-    const maintenance = clamp(900 + (i % 50) * 95, 600, 7_000);
+    
+    // Loyers augmentés de ~30% pour meilleure rentabilité
+    const baseRent = clamp(1000 + (i % 10) * 120, 950, 2800);
+    
+    // Dépenses réduites de ~25% pour meilleur cash flow
+    const taxes = clamp(1_500 + (i % 50) * 140, 1_200, 7_000);
+    const insurance = clamp(550 + (i % 50) * 35, 400, 2_500);
+    const maintenance = clamp(700 + (i % 50) * 75, 500, 5_500);
+    
     const cycle = ["bon", "moyen", "à rénover"] as const;
     const plumbingState = pick(cycle as unknown as string[], i + 1);
     const electricityState = pick(cycle as unknown as string[], i + 2);

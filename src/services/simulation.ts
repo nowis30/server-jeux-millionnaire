@@ -107,7 +107,8 @@ export async function annualUpdate(gameId: string) {
   for (const h of holdings) {
     // Appréciation fixée par le jeu pour l'année, dans [2%,5%]
     const newValue = Math.max(0, h.currentValue * (1 + appr));
-    const inflation = 0.02 + randn_bm() * 0.01;
+    // Inflation des loyers plus forte (2.5% à 4.5%) pour améliorer rentabilité dans le temps
+    const inflation = 0.025 + randn_bm() * 0.01;
     const newRent = Math.max(0, h.currentRent * (1 + inflation));
     await prisma.propertyHolding.update({ where: { id: h.id }, data: { currentValue: newValue, currentRent: newRent } });
   }
