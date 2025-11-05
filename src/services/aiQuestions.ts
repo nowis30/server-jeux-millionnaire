@@ -61,6 +61,75 @@ const categoryPrompts = {
 };
 
 /**
+ * Mélange l'ordre des options de réponse et ajuste correctAnswer
+ */
+function shuffleAnswers(q: GeneratedQuestion): GeneratedQuestion {
+  const options = [
+    { letter: 'A', text: q.optionA },
+    { letter: 'B', text: q.optionB },
+    { letter: 'C', text: q.optionC },
+    { letter: 'D', text: q.optionD },
+  ];
+
+  // Trouver la bonne réponse avant le mélange
+  const correctOption = options.find(opt => opt.letter === q.correctAnswer);
+  
+  // Mélanger les options (algorithme Fisher-Yates)
+  for (let i = options.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [options[i], options[j]] = [options[j], options[i]];
+  }
+
+  // Trouver la nouvelle lettre de la bonne réponse
+  const newCorrectIndex = options.findIndex(opt => opt.text === correctOption?.text);
+  const newCorrectLetter = ['A', 'B', 'C', 'D'][newCorrectIndex] as 'A' | 'B' | 'C' | 'D';
+
+  return {
+    ...q,
+    optionA: options[0].text,
+    optionB: options[1].text,
+    optionC: options[2].text,
+    optionD: options[3].text,
+    correctAnswer: newCorrectLetter,
+  };
+}
+
+/**
+ * Vérifie si une question similaire existe déjà (éviter les doublons)
+ */
+async function isDuplicate(question: string): Promise<boolean> {
+  // Normaliser le texte pour la comparaison
+  const normalized = question.toLowerCase().trim();
+  
+  // Chercher des questions similaires (même texte ou très proche)
+  const existing = await prisma.quizQuestion.findMany({
+    select: { question: true }
+  });
+
+  for (const q of existing) {
+    const existingNormalized = q.question.toLowerCase().trim();
+    
+    // Vérifier similarité exacte
+    if (existingNormalized === normalized) {
+      return true;
+    }
+    
+    // Vérifier similarité très proche (90% des mots en commun)
+    const words1 = new Set(normalized.split(/\s+/));
+    const words2 = new Set(existingNormalized.split(/\s+/));
+    const intersection = new Set([...words1].filter(x => words2.has(x)));
+    const union = new Set([...words1, ...words2]);
+    const similarity = intersection.size / union.size;
+    
+    if (similarity > 0.9) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
  * Génère des questions via l'API OpenAI
  */
 export async function generateQuestionsWithAI(
@@ -80,12 +149,15 @@ export async function generateQuestionsWithAI(
 Difficulté : ${difficultyPrompts[difficulty]}
 Catégorie : ${categoryPrompts[category]}
 
-Assure-toi que :
-1. Les 4 options sont plausibles
+IMPORTANT - Critères de création :
+1. Les 4 options doivent être plausibles et crédibles
 2. Une seule réponse est correcte
-3. Les questions sont variées
-4. Le français est impeccable
-5. Le format JSON est valide
+3. Les questions doivent être TRÈS VARIÉES et ORIGINALES
+4. Évite les questions trop similaires entre elles
+5. Le français doit être impeccable
+6. Le format JSON doit être valide
+7. Chaque question doit être unique et ne pas ressembler aux autres
+8. Varie les types de questions : définitions, calculs, comparaisons, stratégies, etc.
 
 Réponds UNIQUEMENT avec le JSON, sans texte avant ou après.`;
 
@@ -95,8 +167,8 @@ Réponds UNIQUEMENT avec le JSON, sans texte avant ou après.`;
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: userPrompt }
       ],
-      temperature: 0.8, // Créativité modérée
-      max_tokens: 2000,
+      temperature: 0.9, // Plus de créativité pour plus de diversité
+      max_tokens: 3000, // Augmenté pour permettre plus de questions
       response_format: { type: "json_object" }
     });
 
@@ -133,46 +205,68 @@ export async function generateAndSaveQuestions(): Promise<number> {
   console.log("[AI] Démarrage génération automatique de questions...");
 
   try {
-    // Générer un mélange de questions
+    // Générer beaucoup plus de questions pour plus de diversité
     const batches = [
-      { difficulty: 'easy' as const, category: 'finance' as const, count: 2 },
-      { difficulty: 'easy' as const, category: 'economy' as const, count: 1 },
-      { difficulty: 'medium' as const, category: 'finance' as const, count: 2 },
-      { difficulty: 'medium' as const, category: 'real-estate' as const, count: 2 },
-      { difficulty: 'hard' as const, category: 'finance' as const, count: 1 },
-      { difficulty: 'hard' as const, category: 'economy' as const, count: 1 },
+      // Questions faciles (40 questions)
+      { difficulty: 'easy' as const, category: 'finance' as const, count: 15 },
+      { difficulty: 'easy' as const, category: 'economy' as const, count: 15 },
+      { difficulty: 'easy' as const, category: 'real-estate' as const, count: 10 },
+      
+      // Questions moyennes (35 questions)
+      { difficulty: 'medium' as const, category: 'finance' as const, count: 12 },
+      { difficulty: 'medium' as const, category: 'economy' as const, count: 12 },
+      { difficulty: 'medium' as const, category: 'real-estate' as const, count: 11 },
+      
+      // Questions difficiles (25 questions)
+      { difficulty: 'hard' as const, category: 'finance' as const, count: 10 },
+      { difficulty: 'hard' as const, category: 'economy' as const, count: 8 },
+      { difficulty: 'hard' as const, category: 'real-estate' as const, count: 7 },
     ];
 
     let totalCreated = 0;
+    let totalDuplicates = 0;
 
     for (const batch of batches) {
+      console.log(`[AI] Génération: ${batch.count} questions ${batch.difficulty}/${batch.category}...`);
       const questions = await generateQuestionsWithAI(batch.difficulty, batch.category, batch.count);
       
       for (const q of questions) {
         try {
+          // Vérifier si c'est un doublon
+          const duplicate = await isDuplicate(q.question);
+          if (duplicate) {
+            console.log(`[AI] Question en doublon ignorée: "${q.question.substring(0, 50)}..."`);
+            totalDuplicates++;
+            continue;
+          }
+
+          // Mélanger l'ordre des réponses pour plus de diversité
+          const shuffled = shuffleAnswers(q);
+
           await prisma.quizQuestion.create({
             data: {
-              question: q.question,
-              optionA: q.optionA,
-              optionB: q.optionB,
-              optionC: q.optionC,
-              optionD: q.optionD,
-              correctAnswer: q.correctAnswer,
-              difficulty: q.difficulty,
-              category: q.category,
+              question: shuffled.question,
+              optionA: shuffled.optionA,
+              optionB: shuffled.optionB,
+              optionC: shuffled.optionC,
+              optionD: shuffled.optionD,
+              correctAnswer: shuffled.correctAnswer,
+              difficulty: shuffled.difficulty,
+              category: shuffled.category,
             }
           });
           totalCreated++;
-        } catch (err) {
-          console.error("[AI] Erreur sauvegarde question:", err);
+          console.log(`[AI] ✓ Question créée (${totalCreated}): "${shuffled.question.substring(0, 60)}..."`);
+        } catch (err: any) {
+          console.error("[AI] Erreur sauvegarde question:", err.message);
         }
       }
 
-      // Pause entre les batches pour éviter rate limiting
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Pause entre les batches pour éviter rate limiting (OpenAI a des limites)
+      await new Promise(resolve => setTimeout(resolve, 2000));
     }
 
-    console.log(`[AI] ${totalCreated} nouvelles questions créées`);
+    console.log(`[AI] ✅ ${totalCreated} nouvelles questions créées (${totalDuplicates} doublons évités)`);
 
     // Rotation : garder max 100 questions par difficulté
     await rotateQuestions();
