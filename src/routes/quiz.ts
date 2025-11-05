@@ -573,4 +573,58 @@ export async function registerQuizRoutes(app: FastifyInstance) {
       return reply.status(500).send({ error: err.message });
     }
   });
+
+  // GET /api/quiz/public-stats - Statistiques publiques (sans auth)
+  app.get("/api/quiz/public-stats", async (req, reply) => {
+    try {
+      const [total, easy, medium, hard, finance, economy, realEstate] = await Promise.all([
+        prisma.quizQuestion.count(),
+        prisma.quizQuestion.count({ where: { difficulty: 'easy' } }),
+        prisma.quizQuestion.count({ where: { difficulty: 'medium' } }),
+        prisma.quizQuestion.count({ where: { difficulty: 'hard' } }),
+        prisma.quizQuestion.count({ where: { category: 'finance' } }),
+        prisma.quizQuestion.count({ where: { category: 'economy' } }),
+        prisma.quizQuestion.count({ where: { category: 'real-estate' } }),
+      ]);
+
+      return reply.send({
+        questions: total,
+        easy,
+        medium,
+        hard,
+        finance,
+        economy,
+        realEstate,
+      });
+    } catch (err: any) {
+      app.log.error({ err }, "Erreur stats questions publiques");
+      return reply.status(500).send({ error: err.message });
+    }
+  });
+
+  // POST /api/quiz/trigger-generation - Déclencher génération (secret key)
+  app.post("/api/quiz/trigger-generation", async (req, reply) => {
+    try {
+      const bodySchema = z.object({ secret: z.string().optional() });
+      const { secret } = bodySchema.parse((req as any).body || {});
+      
+      // Vérifier le secret (configurer QUIZ_GENERATION_SECRET dans .env)
+      const expectedSecret = process.env.QUIZ_GENERATION_SECRET || "generate123";
+      if (secret !== expectedSecret) {
+        return reply.status(401).send({ error: "Secret invalide" });
+      }
+
+      app.log.info("🤖 Génération de questions déclenchée manuellement");
+      const created = await generateAndSaveQuestions();
+      
+      return reply.send({
+        success: true,
+        created,
+        message: `${created} questions générées avec succès`,
+      });
+    } catch (err: any) {
+      app.log.error({ err }, "Erreur génération déclenchée");
+      return reply.status(500).send({ error: err.message });
+    }
+  });
 }
