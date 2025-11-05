@@ -2,7 +2,7 @@ import { FastifyInstance } from "fastify";
 import { prisma } from "../prisma";
 import { z } from "zod";
 import { requireUserOrGuest, requireAdmin } from "./auth";
-import { generateAndSaveQuestions } from "../services/aiQuestions";
+import { generateAndSaveQuestions, replenishIfLow } from "../services/aiQuestions";
 import {
   updatePlayerTokens,
   consumeQuizToken,
@@ -846,6 +846,69 @@ export async function registerQuizRoutes(app: FastifyInstance) {
       });
     } catch (err: any) {
       app.log.error({ err }, "Erreur génération GET");
+      return reply.status(500).send({ error: err.message });
+    }
+  });
+
+  // GET /api/quiz/admin-purge - Purger jusqu'à N questions sans tentative (secret requis) et réappro optionnel
+  app.get("/api/quiz/admin-purge", async (req, reply) => {
+    try {
+      const querySchema = z.object({
+        secret: z.string().optional(),
+        count: z.coerce.number().min(1).max(1000).optional(),
+        replenish: z.coerce.number().optional(), // 1 pour activer
+      });
+      const { secret, count = 250, replenish = 1 } = querySchema.parse((req as any).query || {});
+
+      const expectedSecret = process.env.QUIZ_GENERATION_SECRET || "generate123";
+      if (secret !== expectedSecret) {
+        return reply.status(401).send({ error: "Secret invalide - ajoutez ?secret=generate123" });
+      }
+
+      // Stats avant
+      const [totalBefore, usedBefore] = await Promise.all([
+        prisma.quizQuestion.count(),
+        prisma.quizAttempt.findMany({ distinct: ["questionId"], select: { questionId: true } }).then(r => r.length),
+      ]);
+      const remainingBefore = Math.max(0, totalBefore - usedBefore);
+
+      // Supprimer jusqu'à 'count' questions sans tentative (les plus anciennes)
+      const deletable = await prisma.quizQuestion.findMany({
+        where: { attempts: { none: {} } },
+        select: { id: true },
+        orderBy: { createdAt: 'asc' },
+        take: Math.min(1000, Math.max(1, count)),
+      });
+      let deleted = 0;
+      if (deletable.length > 0) {
+        const ids = deletable.map(d => d.id);
+        const del = await prisma.quizQuestion.deleteMany({ where: { id: { in: ids } } });
+        deleted = del.count;
+      }
+
+      // Stats après
+      const [totalAfter, usedAfter] = await Promise.all([
+        prisma.quizQuestion.count(),
+        prisma.quizAttempt.findMany({ distinct: ["questionId"], select: { questionId: true } }).then(r => r.length),
+      ]);
+      const remainingAfter = Math.max(0, totalAfter - usedAfter);
+
+      // Réappro si demandé et stock faible
+      let created = 0;
+      if (replenish === 1) {
+        const res = await replenishIfLow(100);
+        created = res.created;
+      }
+
+      return reply.send({
+        success: true,
+        deleted,
+        before: { total: totalBefore, used: usedBefore, remaining: remainingBefore },
+        after: { total: totalAfter, used: usedAfter, remaining: remainingAfter },
+        created,
+      });
+    } catch (err: any) {
+      app.log.error({ err }, "Erreur admin-purge");
       return reply.status(500).send({ error: err.message });
     }
   });
