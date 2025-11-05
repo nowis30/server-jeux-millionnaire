@@ -168,21 +168,50 @@ export async function registerGameRoutes(app: FastifyInstance) {
     if (!confirm) {
       return reply.status(400).send({ error: "Cette action va effacer les joueurs, annonces, positions et ticks du marché de la partie. Ajoutez {confirm:true} pour continuer." });
     }
-    // Effacer proprement les données liées à la partie
-    await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      // Ordre important: supprimer d'abord les tables qui référencent d'autres tables
-      await tx.listing.deleteMany({ where: { gameId: id } });
-      await tx.dividendLog.deleteMany({ where: { gameId: id } });
-      await tx.repairEvent.deleteMany({ where: { holding: { gameId: id } } });
-      await tx.refinanceLog.deleteMany({ where: { holding: { gameId: id } } });
-      await tx.propertyHolding.deleteMany({ where: { gameId: id } });
-      await tx.marketHolding.deleteMany({ where: { gameId: id } });
-      await tx.marketTick.deleteMany({ where: { gameId: id } });
-      await tx.player.deleteMany({ where: { gameId: id } });
-      await tx.game.update({ where: { id }, data: { status: "running", startedAt: new Date() } });
-    });
-    (app as any).io?.emit("lobby-update", { type: "restarted", gameId: id });
-    return reply.send({ id, status: "running", restartedAt: new Date().toISOString() });
+    
+    try {
+      // Effacer proprement les données liées à la partie
+      await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        // Ordre important: supprimer d'abord les tables qui référencent d'autres tables
+        app.log.info({ gameId: id }, "Suppression listings...");
+        await tx.listing.deleteMany({ where: { gameId: id } });
+        
+        app.log.info({ gameId: id }, "Suppression dividendLogs...");
+        await tx.dividendLog.deleteMany({ where: { gameId: id } });
+        
+        app.log.info({ gameId: id }, "Suppression repairEvents...");
+        await tx.repairEvent.deleteMany({ where: { holding: { gameId: id } } });
+        
+        app.log.info({ gameId: id }, "Suppression refinanceLogs...");
+        await tx.refinanceLog.deleteMany({ where: { holding: { gameId: id } } });
+        
+        app.log.info({ gameId: id }, "Suppression propertyHoldings...");
+        await tx.propertyHolding.deleteMany({ where: { gameId: id } });
+        
+        app.log.info({ gameId: id }, "Suppression marketHoldings...");
+        await tx.marketHolding.deleteMany({ where: { gameId: id } });
+        
+        app.log.info({ gameId: id }, "Suppression marketTicks...");
+        await tx.marketTick.deleteMany({ where: { gameId: id } });
+        
+        app.log.info({ gameId: id }, "Suppression players...");
+        await tx.player.deleteMany({ where: { gameId: id } });
+        
+        app.log.info({ gameId: id }, "Mise à jour game status...");
+        await tx.game.update({ where: { id }, data: { status: "running", startedAt: new Date() } });
+      });
+      
+      (app as any).io?.emit("lobby-update", { type: "restarted", gameId: id });
+      app.log.info({ gameId: id }, "Restart réussi");
+      return reply.send({ id, status: "running", restartedAt: new Date().toISOString() });
+    } catch (err: any) {
+      app.log.error({ err, gameId: id }, "Erreur lors du restart");
+      return reply.status(500).send({ 
+        error: "Erreur lors du redémarrage", 
+        details: err.message,
+        code: err.code 
+      });
+    }
   });
 
   // Supprimer un joueur (admin) et toutes ses données liées à la partie
