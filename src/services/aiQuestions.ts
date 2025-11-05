@@ -13,23 +13,38 @@ interface GeneratedQuestion {
   optionD: string;
   correctAnswer: 'A' | 'B' | 'C' | 'D';
   difficulty: 'easy' | 'medium' | 'hard';
-  category: 'finance' | 'economy' | 'real-estate';
+  category: 'finance' | 'economy' | 'real-estate' | 'business' | 'technology' | 'science' | 'history' | 'geography' | 'sports' | 'arts' | 'cinema' | 'music' | 'literature' | 'culture' | 'nature' | 'health' | 'food' | 'general';
+  imageUrl?: string; // URL optionnelle d'une image illustrant la question
 }
 
-const SYSTEM_PROMPT = `Tu es un expert en finance, économie et immobilier. Tu crées des questions de quiz pour un jeu de simulation économique appelé "Héritier Millionnaire".
+const SYSTEM_PROMPT = `Tu es un expert universel en culture générale. Tu crées des questions de quiz variées et passionnantes sur TOUS les sujets imaginables.
 
-Le jeu contient :
-- Un marché boursier avec 5 actifs (SP500, QQQ, TSX, GLD, TLT)
-- De l'immobilier (achat, vente, refinancement, hypothèques)
-- Des dividendes trimestriels
-- Des taux hypothécaires variables (2% à 7%)
-- Un système de quiz "Quitte ou Double"
+Catégories disponibles:
+- finance, economy, real-estate: Finance, économie, immobilier, marché boursier
+- business: Entrepreneuriat, management, commerce, marketing
+- technology: Informatique, innovations, gadgets, intelligence artificielle
+- science: Physique, chimie, biologie, astronomie, mathématiques
+- history: Histoire mondiale, événements marquants, personnalités historiques
+- geography: Pays, capitales, montagnes, océans, continents
+- sports: Football, olympiques, records, athlètes célèbres
+- arts: Peinture, sculpture, architecture, arts visuels
+- cinema: Films, réalisateurs, acteurs, oscars
+- music: Artistes, albums, genres musicaux, instruments
+- literature: Livres, auteurs, poésie, œuvres classiques
+- culture: Traditions, coutumes, gastronomie, langues
+- nature: Animaux, plantes, environnement, écosystèmes
+- health: Santé, nutrition, bien-être, anatomie
+- food: Cuisine, recettes, gastronomie, ingrédients
+- general: Culture générale variée, faits intéressants
 
-Génère des questions pertinentes et éducatives. Les questions doivent être :
+Pour certaines questions, tu peux ajouter une image pour illustrer (personnage historique, monument, animal, œuvre d'art, etc.). Utilise des URLs d'images Unsplash ou Pexels en haute qualité.
+
+Génère des questions qui sont :
 - Claires et précises
 - Adaptées au niveau de difficulté demandé
-- Réalistes et basées sur des concepts financiers réels
 - Intéressantes et engageantes
+- Éducatives et basées sur des faits réels
+- Diversifiées (pas seulement finance/économie)
 
 Format de réponse OBLIGATOIRE (JSON valide):
 {
@@ -42,11 +57,18 @@ Format de réponse OBLIGATOIRE (JSON valide):
       "optionD": "Quatrième option",
       "correctAnswer": "A",
       "difficulty": "easy",
-      "category": "finance",
+      "category": "history",
+      "imageUrl": "https://images.unsplash.com/photo-xxx",
       "explanation": "Courte explication de la bonne réponse"
     }
   ]
-}`;
+}
+
+IMPORTANT pour imageUrl:
+- Utilise des URLs Unsplash (https://images.unsplash.com/photo-...) ou Pexels
+- Seulement si l'image ajoute de la valeur (monument, personne, animal, œuvre)
+- Laisse vide si pas nécessaire
+- Images haute qualité et pertinentes uniquement`;
 
 const difficultyPrompts = {
   easy: "Questions simples sur les concepts de base (définitions, règles du jeu, symboles boursiers). Niveau débutant.",
@@ -55,9 +77,24 @@ const difficultyPrompts = {
 };
 
 const categoryPrompts = {
-  finance: "Marché boursier, actions, obligations, dividendes, rendements, symboles (SP500, QQQ, TSX, GLD, TLT)",
-  economy: "Économie du jeu, mécaniques, stratégies, taux d'intérêt, inflation, cycles économiques",
-  'real-estate': "Immobilier, hypothèques, refinancement, appréciation, loyers, taxes, maintenance"
+  finance: "Marché boursier, actions, obligations, dividendes, rendements, investissements",
+  economy: "Économie, taux d'intérêt, inflation, PIB, commerce international",
+  'real-estate': "Immobilier, hypothèques, propriétés, loyers, valorisation",
+  business: "Entrepreneuriat, management, stratégie d'entreprise, marketing, leadership",
+  technology: "Informatique, programmation, gadgets, IA, innovations technologiques",
+  science: "Physique, chimie, biologie, astronomie, découvertes scientifiques",
+  history: "Histoire mondiale, guerres, révolutions, personnages historiques, civilisations",
+  geography: "Pays, capitales, montagnes, océans, continents, villes",
+  sports: "Football, basketball, olympiques, records sportifs, athlètes",
+  arts: "Peinture, sculpture, architecture, mouvements artistiques, musées",
+  cinema: "Films cultes, réalisateurs, acteurs, oscars, cinéma mondial",
+  music: "Artistes, albums, genres musicaux, instruments, concerts",
+  literature: "Romans, poésie, auteurs célèbres, prix littéraires, œuvres classiques",
+  culture: "Traditions, gastronomie, langues, coutumes, fêtes",
+  nature: "Animaux, plantes, forêts, déserts, biodiversité, écologie",
+  health: "Santé, nutrition, exercice, anatomie, maladies, bien-être",
+  food: "Cuisine, recettes, ingrédients, restaurants, spécialités culinaires",
+  general: "Culture générale, faits intéressants, anecdotes, connaissances diverses"
 };
 
 /**
@@ -134,7 +171,7 @@ async function isDuplicate(question: string): Promise<boolean> {
  */
 export async function generateQuestionsWithAI(
   difficulty: 'easy' | 'medium' | 'hard',
-  category: 'finance' | 'economy' | 'real-estate',
+  category: 'finance' | 'economy' | 'real-estate' | 'business' | 'technology' | 'science' | 'history' | 'geography' | 'sports' | 'arts' | 'cinema' | 'music' | 'literature' | 'culture' | 'nature' | 'health' | 'food' | 'general',
   count: number = 5
 ): Promise<GeneratedQuestion[]> {
   
@@ -205,22 +242,50 @@ export async function generateAndSaveQuestions(): Promise<number> {
   console.log("[AI] Démarrage génération automatique de questions...");
 
   try {
-    // Générer beaucoup plus de questions pour plus de diversité
+    // Générer des questions diversifiées sur tous les sujets (100 questions total)
     const batches = [
-      // Questions faciles (40 questions)
-      { difficulty: 'easy' as const, category: 'finance' as const, count: 15 },
-      { difficulty: 'easy' as const, category: 'economy' as const, count: 15 },
-      { difficulty: 'easy' as const, category: 'real-estate' as const, count: 10 },
+      // Questions faciles (40 questions) - Culture générale accessible
+      { difficulty: 'easy' as const, category: 'general' as const, count: 5 },
+      { difficulty: 'easy' as const, category: 'geography' as const, count: 4 },
+      { difficulty: 'easy' as const, category: 'history' as const, count: 4 },
+      { difficulty: 'easy' as const, category: 'sports' as const, count: 4 },
+      { difficulty: 'easy' as const, category: 'cinema' as const, count: 3 },
+      { difficulty: 'easy' as const, category: 'music' as const, count: 3 },
+      { difficulty: 'easy' as const, category: 'science' as const, count: 3 },
+      { difficulty: 'easy' as const, category: 'nature' as const, count: 3 },
+      { difficulty: 'easy' as const, category: 'food' as const, count: 3 },
+      { difficulty: 'easy' as const, category: 'finance' as const, count: 2 },
+      { difficulty: 'easy' as const, category: 'technology' as const, count: 2 },
+      { difficulty: 'easy' as const, category: 'arts' as const, count: 2 },
+      { difficulty: 'easy' as const, category: 'culture' as const, count: 2 },
       
-      // Questions moyennes (35 questions)
-      { difficulty: 'medium' as const, category: 'finance' as const, count: 12 },
-      { difficulty: 'medium' as const, category: 'economy' as const, count: 12 },
-      { difficulty: 'medium' as const, category: 'real-estate' as const, count: 11 },
+      // Questions moyennes (35 questions) - Connaissances intermédiaires
+      { difficulty: 'medium' as const, category: 'history' as const, count: 4 },
+      { difficulty: 'medium' as const, category: 'science' as const, count: 4 },
+      { difficulty: 'medium' as const, category: 'literature' as const, count: 3 },
+      { difficulty: 'medium' as const, category: 'geography' as const, count: 3 },
+      { difficulty: 'medium' as const, category: 'arts' as const, count: 3 },
+      { difficulty: 'medium' as const, category: 'business' as const, count: 3 },
+      { difficulty: 'medium' as const, category: 'technology' as const, count: 3 },
+      { difficulty: 'medium' as const, category: 'cinema' as const, count: 2 },
+      { difficulty: 'medium' as const, category: 'sports' as const, count: 2 },
+      { difficulty: 'medium' as const, category: 'health' as const, count: 2 },
+      { difficulty: 'medium' as const, category: 'economy' as const, count: 2 },
+      { difficulty: 'medium' as const, category: 'music' as const, count: 2 },
+      { difficulty: 'medium' as const, category: 'nature' as const, count: 2 },
       
-      // Questions difficiles (25 questions)
-      { difficulty: 'hard' as const, category: 'finance' as const, count: 10 },
-      { difficulty: 'hard' as const, category: 'economy' as const, count: 8 },
-      { difficulty: 'hard' as const, category: 'real-estate' as const, count: 7 },
+      // Questions difficiles (25 questions) - Expertise requise
+      { difficulty: 'hard' as const, category: 'science' as const, count: 4 },
+      { difficulty: 'hard' as const, category: 'history' as const, count: 3 },
+      { difficulty: 'hard' as const, category: 'literature' as const, count: 3 },
+      { difficulty: 'hard' as const, category: 'technology' as const, count: 2 },
+      { difficulty: 'hard' as const, category: 'arts' as const, count: 2 },
+      { difficulty: 'hard' as const, category: 'finance' as const, count: 2 },
+      { difficulty: 'hard' as const, category: 'real-estate' as const, count: 2 },
+      { difficulty: 'hard' as const, category: 'business' as const, count: 2 },
+      { difficulty: 'hard' as const, category: 'geography' as const, count: 2 },
+      { difficulty: 'hard' as const, category: 'economy' as const, count: 2 },
+      { difficulty: 'hard' as const, category: 'health' as const, count: 1 },
     ];
 
     let totalCreated = 0;
@@ -253,6 +318,7 @@ export async function generateAndSaveQuestions(): Promise<number> {
               correctAnswer: shuffled.correctAnswer,
               difficulty: shuffled.difficulty,
               category: shuffled.category,
+              imageUrl: shuffled.imageUrl || null, // Image optionnelle
             }
           });
           totalCreated++;

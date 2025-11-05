@@ -208,7 +208,8 @@ model QuizQuestion {
   optionD     String
   correctAnswer String  // 'A', 'B', 'C', ou 'D'
   difficulty  String   // 'easy', 'medium', 'hard'
-  category    String   // 'finance', 'economy', 'real-estate'
+  category    String   // 'finance', 'economy', 'real-estate', 'business', 'technology', 'science', 'history', 'geography', 'sports', 'arts', 'cinema', 'music', 'literature', 'culture', 'nature', 'health', 'food', 'general'
+  imageUrl    String?  // URL optionnelle d'une image illustrant la question
   createdAt   DateTime @default(now())
   
   attempts    QuizAttempt[]

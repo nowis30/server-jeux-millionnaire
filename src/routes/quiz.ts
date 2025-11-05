@@ -305,6 +305,76 @@ export async function registerQuizRoutes(app: FastifyInstance) {
     }
   });
 
+  // GET /api/games/:gameId/quiz/resume - Reprendre une session active et obtenir la question courante
+  app.get("/api/games/:gameId/quiz/resume", { preHandler: requireUserOrGuest(app) }, async (req, reply) => {
+    const paramsSchema = z.object({ gameId: z.string() });
+    const { gameId } = paramsSchema.parse((req as any).params);
+    const user = (req as any).user;
+
+    try {
+      // Identifier le joueur (priorité header)
+      const playerIdHeader = req.headers['x-player-id'] as string | undefined;
+      const playerIdFromMiddleware = user.playerIdFromHeader as string | undefined;
+
+      let player;
+      if (playerIdHeader) {
+        player = await prisma.player.findFirst({ where: { id: playerIdHeader, gameId } });
+      } else if (playerIdFromMiddleware) {
+        player = await prisma.player.findFirst({ where: { id: playerIdFromMiddleware, gameId } });
+      } else if (user.guestId) {
+        player = await prisma.player.findFirst({ where: { gameId, guestId: user.guestId } });
+      }
+
+      if (!player) {
+        return reply.status(404).send({ error: "Joueur non trouvé" });
+      }
+
+      // Trouver la session active
+      const activeSession = await prisma.quizSession.findFirst({
+        where: { playerId: player.id, gameId, status: 'active' },
+      });
+
+      if (!activeSession) {
+        return reply.status(404).send({ error: "Aucune session active à reprendre" });
+      }
+
+      // Déterminer la difficulté à partir de la question courante
+      const prizeInfo = PRIZE_LADDER[activeSession.currentQuestion - 1];
+      const difficulty = prizeInfo?.difficulty || 'easy';
+
+      // Sélectionner une question non vue
+      const question = await selectUnseenQuestion(player.id, difficulty);
+      if (!question) {
+        return reply.status(500).send({ error: "Aucune question disponible pour reprise" });
+      }
+
+      // Marquer comme vue
+      await markQuestionAsSeen(player.id, question.id);
+
+      return reply.send({
+        session: {
+          id: activeSession.id,
+          currentQuestion: activeSession.currentQuestion,
+          currentEarnings: activeSession.currentEarnings,
+          securedAmount: activeSession.securedAmount,
+          nextPrize: prizeInfo?.amount || 0,
+        },
+        question: {
+          id: question.id,
+          text: question.question,
+          optionA: question.optionA,
+          optionB: question.optionB,
+          optionC: question.optionC,
+          optionD: question.optionD,
+        },
+      });
+
+    } catch (err: any) {
+      app.log.error({ err }, "Erreur resume quiz");
+      return reply.status(500).send({ error: err.message });
+    }
+  });
+
   // POST /api/games/:gameId/quiz/answer - Répondre à la question actuelle
   app.post("/api/games/:gameId/quiz/answer", { preHandler: requireUserOrGuest(app) }, async (req, reply) => {
     const paramsSchema = z.object({ gameId: z.string() });
