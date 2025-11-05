@@ -28,26 +28,18 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     const existing = await prisma.user.findUnique({ where: { email } });
     if (existing) return reply.status(409).send({ error: "Email déjà utilisé" });
     const passwordHash = await bcrypt.hash(password, 10);
-  const isAdmin = !!env.ADMIN_EMAIL && email.toLowerCase() === env.ADMIN_EMAIL.toLowerCase();
-  const user = await (prisma as any).user.create({ data: { email, passwordHash, isAdmin, emailVerified: isAdmin ? true : false } });
-    // Envoyer un email de vérification uniquement pour les non‑admins
-    if (!isAdmin) {
-      try {
-        const token = nanoid();
-        const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24); // 24h
-        await (prisma as any).emailVerificationToken.create({ data: { userId: user.id, token, expiresAt } });
-        const link = `${env.APP_ORIGIN.replace(/\/$/, "")}/verify?token=${encodeURIComponent(token)}`;
-        await sendMail({
-          to: email,
-          subject: "Vérifiez votre adresse email",
-          html: `<p>Bienvenue!</p><p>Pour activer votre compte, cliquez sur le lien suivant (valide 24h):</p><p><a href="${link}">${link}</a></p>`,
-        });
-      } catch (e) {
-        app.log.warn({ err: e }, "Envoi email de vérification échoué");
-      }
-    }
-    // Pas d'auth tant que non vérifié
-    return reply.send({ ok: true, message: "Compte créé. Vérifiez votre email pour activer le compte." });
+    const isAdmin = !!env.ADMIN_EMAIL && email.toLowerCase() === env.ADMIN_EMAIL.toLowerCase();
+    // Tous les comptes sont automatiquement vérifiés (pas d'email de vérification)
+    const user = await (prisma as any).user.create({ 
+      data: { email, passwordHash, isAdmin, emailVerified: true } 
+    });
+    // Créer un token JWT et connecter l'utilisateur immédiatement
+    const token = (app as any).jwt.sign({ sub: user.id, email: user.email, isAdmin: user.isAdmin }, { expiresIn: "12h" });
+    reply.setCookie("hm_auth", token, { path: "/", httpOnly: true, sameSite: "none", secure: true });
+    // Rafraîchir CSRF
+    const csrf = Math.random().toString(36).slice(2);
+    reply.setCookie("hm_csrf", csrf, { path: "/", httpOnly: false, sameSite: "none", secure: true });
+    return reply.send({ id: user.id, email: user.email, isAdmin: user.isAdmin, token });
   });
 
   // login
