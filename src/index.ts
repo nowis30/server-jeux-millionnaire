@@ -154,10 +154,13 @@ async function bootstrap() {
       const origin = (req.headers?.["origin"] as string) || "";
       const allowed = !origin || env.CLIENT_ORIGINS.includes(origin) || /\.vercel\.app$/.test(origin) || origin.startsWith("http://localhost:");
       const hasAuth = Boolean((req as any).cookies?.["hm_auth"]);
+      const hasGuest = Boolean((req as any).cookies?.["hm_guest"]);
+      const hasPlayerId = Boolean(req.headers?.["x-player-id"]);
       
-      // Tolérer si origine autorisée ET header CSRF présent (même si le cookie CSRF est bloqué par le navigateur)
+      // Tolérer si origine autorisée ET (header CSRF présent OU session authentifiée OU guest/playerId présent)
       if (allowed && tokenHeader) return;
       if (allowed && hasAuth) return;
+      if (allowed && (hasGuest || hasPlayerId)) return;
       
       return reply.status(403).send({ error: "CSRF token invalid" });
     }
