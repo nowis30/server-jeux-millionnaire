@@ -10,29 +10,14 @@ import {
   getTimeUntilNextToken,
 } from "../services/quizTokens";
 
-// Structure des gains par question (Quitte ou Double)
-const PRIZE_LADDER = [
-  { question: 1, amount: 1000, difficulty: 'easy', milestone: false },
-  { question: 2, amount: 2000, difficulty: 'easy', milestone: false },
-  { question: 3, amount: 3000, difficulty: 'easy', milestone: false },
-  { question: 4, amount: 4000, difficulty: 'easy', milestone: false },
-  { question: 5, amount: 5000, difficulty: 'easy', milestone: true },  // Palier 1
-  { question: 6, amount: 10000, difficulty: 'medium', milestone: false },
-  { question: 7, amount: 20000, difficulty: 'medium', milestone: false },
-  { question: 8, amount: 30000, difficulty: 'medium', milestone: false },
-  { question: 9, amount: 40000, difficulty: 'medium', milestone: false },
-  { question: 10, amount: 50000, difficulty: 'medium', milestone: true },  // Palier 2
-  { question: 11, amount: 75000, difficulty: 'hard', milestone: false },
-  { question: 12, amount: 100000, difficulty: 'hard', milestone: false },
-  { question: 13, amount: 150000, difficulty: 'hard', milestone: false },
-  { question: 14, amount: 250000, difficulty: 'hard', milestone: false },
-  { question: 15, amount: 500000, difficulty: 'hard', milestone: true },  // Palier 3
-  { question: 16, amount: 750000, difficulty: 'hard', milestone: false },
-  { question: 17, amount: 1000000, difficulty: 'hard', milestone: false },
-  { question: 18, amount: 1500000, difficulty: 'hard', milestone: false },
-  { question: 19, amount: 2500000, difficulty: 'hard', milestone: false },
-  { question: 20, amount: 5000000, difficulty: 'hard', milestone: true },  // Palier final
-];
+// Règle Quitte ou Double: démarrage à 5000$ et double à chaque bonne réponse
+const BASE_STAKE = 5000;
+const getPrizeAmount = (questionNumber: number) => BASE_STAKE * Math.pow(2, Math.max(0, questionNumber - 1));
+const getDifficultyForQuestion = (questionNumber: number): 'easy' | 'medium' | 'hard' => {
+  if (questionNumber <= 5) return 'easy';
+  if (questionNumber <= 10) return 'medium';
+  return 'hard';
+};
 
 const COOLDOWN_MINUTES = 60;
 
@@ -172,7 +157,7 @@ export async function registerQuizRoutes(app: FastifyInstance) {
       });
 
       if (activeSession) {
-        const currentPrize = PRIZE_LADDER[activeSession.currentQuestion - 1];
+        const currentPrizeAmount = getPrizeAmount(activeSession.currentQuestion);
         return reply.send({
           canPlay: true,
           hasActiveSession: true,
@@ -182,8 +167,8 @@ export async function registerQuizRoutes(app: FastifyInstance) {
             id: activeSession.id,
             currentQuestion: activeSession.currentQuestion,
             currentEarnings: activeSession.currentEarnings,
-            securedAmount: activeSession.securedAmount,
-            nextPrize: currentPrize?.amount || 0,
+            securedAmount: 0,
+            nextPrize: currentPrizeAmount,
           },
         });
       }
@@ -288,7 +273,7 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         currentQuestion: 1,
         currentEarnings: 0,
         securedAmount: 0,
-        nextPrize: PRIZE_LADDER[0].amount,
+        nextPrize: getPrizeAmount(1),
         question: {
           id: question.id,
           text: question.question,
@@ -338,9 +323,8 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         return reply.status(404).send({ error: "Aucune session active à reprendre" });
       }
 
-      // Déterminer la difficulté à partir de la question courante
-      const prizeInfo = PRIZE_LADDER[activeSession.currentQuestion - 1];
-      const difficulty = prizeInfo?.difficulty || 'easy';
+  // Déterminer la difficulté à partir de la question courante (règle dynamique)
+  const difficulty = getDifficultyForQuestion(activeSession.currentQuestion);
 
       // Sélectionner une question non vue
       const question = await selectUnseenQuestion(player.id, difficulty);
@@ -356,8 +340,8 @@ export async function registerQuizRoutes(app: FastifyInstance) {
           id: activeSession.id,
           currentQuestion: activeSession.currentQuestion,
           currentEarnings: activeSession.currentEarnings,
-          securedAmount: activeSession.securedAmount,
-          nextPrize: prizeInfo?.amount || 0,
+          securedAmount: 0,
+          nextPrize: getPrizeAmount(activeSession.currentQuestion),
         },
         question: {
           id: question.id,
@@ -418,21 +402,16 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         return reply.status(404).send({ error: "Question non trouvée" });
       }
 
-      const isCorrect = answer === question.correctAnswer;
-      const currentPrize = PRIZE_LADDER[session.currentQuestion - 1];
+  const isCorrect = answer === question.correctAnswer;
+  const currentPrizeAmount = getPrizeAmount(session.currentQuestion);
       const prizeBefore = session.currentEarnings;
       let prizeAfter = prizeBefore;
       let newStatus = session.status;
-      let newSecuredAmount = session.securedAmount;
+  let newSecuredAmount = 0;
 
       if (isCorrect) {
-        // Bonne réponse
-        prizeAfter = currentPrize.amount;
-        
-        // Vérifier si c'est un palier
-        if (currentPrize.milestone) {
-          newSecuredAmount = prizeAfter;
-        }
+        // Bonne réponse: gains deviennent le montant de cette question
+        prizeAfter = currentPrizeAmount;
 
         // Enregistrer la tentative
         await prisma.quizAttempt.create({
@@ -447,37 +426,7 @@ export async function registerQuizRoutes(app: FastifyInstance) {
           },
         });
 
-        // Vérifier si c'est la dernière question
-        if (session.currentQuestion >= PRIZE_LADDER.length) {
-          // Partie terminée avec succès !
-          await prisma.quizSession.update({
-            where: { id: session.id },
-            data: {
-              status: 'completed',
-              currentEarnings: prizeAfter,
-              securedAmount: prizeAfter,
-              completedAt: new Date(),
-            },
-          });
-
-          // Ajouter l'argent au joueur
-          await prisma.player.update({
-            where: { id: session.playerId },
-            data: {
-              cash: { increment: prizeAfter },
-              netWorth: { increment: prizeAfter },
-            },
-          });
-
-          return reply.send({
-            correct: true,
-            completed: true,
-            finalPrize: prizeAfter,
-            message: `Félicitations ! Vous avez gagné $${prizeAfter.toLocaleString()} !`,
-          });
-        }
-
-        // Passer à la question suivante
+        // Passer à la question suivante (pas de fin automatique)
         await prisma.quizSession.update({
           where: { id: session.id },
           data: {
@@ -487,9 +436,9 @@ export async function registerQuizRoutes(app: FastifyInstance) {
           },
         });
 
-        // Récupérer la prochaine question (non vue)
-        const nextPrizeInfo = PRIZE_LADDER[session.currentQuestion];
-        const nextQuestion = await selectUnseenQuestion(session.player.id, nextPrizeInfo.difficulty);
+  // Récupérer la prochaine question (non vue)
+  const nextDifficulty = getDifficultyForQuestion(session.currentQuestion + 1);
+  const nextQuestion = await selectUnseenQuestion(session.player.id, nextDifficulty);
 
         if (!nextQuestion) {
           return reply.status(500).send({ error: "Erreur chargement question suivante" });
@@ -504,7 +453,7 @@ export async function registerQuizRoutes(app: FastifyInstance) {
           currentQuestion: session.currentQuestion + 1,
           currentEarnings: prizeAfter,
           securedAmount: newSecuredAmount,
-          nextPrize: nextPrizeInfo.amount,
+          nextPrize: getPrizeAmount(session.currentQuestion + 1),
           question: {
             id: nextQuestion.id,
             text: nextQuestion.question,
@@ -516,8 +465,8 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         });
 
       } else {
-        // Mauvaise réponse - retour au dernier palier
-        prizeAfter = newSecuredAmount;
+  // Mauvaise réponse - quitte ou double: tout perdre
+  prizeAfter = 0;
 
         await prisma.quizAttempt.create({
           data: {
@@ -540,7 +489,7 @@ export async function registerQuizRoutes(app: FastifyInstance) {
           },
         });
 
-        // Ajouter l'argent sécurisé au joueur
+        // Ajouter l'argent au joueur si > 0
         if (prizeAfter > 0) {
           await prisma.player.update({
             where: { id: session.playerId },
@@ -556,9 +505,7 @@ export async function registerQuizRoutes(app: FastifyInstance) {
           failed: true,
           correctAnswer: question.correctAnswer,
           finalPrize: prizeAfter,
-          message: prizeAfter > 0 
-            ? `Dommage ! Vous repartez avec $${prizeAfter.toLocaleString()}.` 
-            : "Dommage ! Vous n'avez rien gagné.",
+          message: "Dommage ! Vous avez tout perdu (quitte ou double).",
         });
       }
 
@@ -782,6 +729,74 @@ export async function registerQuizRoutes(app: FastifyInstance) {
       });
     } catch (err: any) {
       app.log.error({ err }, "Erreur réinitialisation questions vues");
+      return reply.status(500).send({ error: err.message });
+    }
+  });
+
+  // GET /api/games/:gameId/quiz/grant-tokens - Ajouter des tokens (secret + identification flexible)
+  app.get("/api/games/:gameId/quiz/grant-tokens", async (req, reply) => {
+    try {
+      const paramsSchema = z.object({ gameId: z.string() });
+      const querySchema = z.object({
+        secret: z.string().optional(),
+        amount: z.coerce.number().optional(),
+        playerId: z.string().optional(),
+        nickname: z.string().optional(),
+      });
+      const { gameId } = paramsSchema.parse((req as any).params);
+      const { secret, amount = 1, playerId, nickname } = querySchema.parse((req as any).query || {});
+
+      const expectedSecret = process.env.QUIZ_GENERATION_SECRET || "generate123";
+      if (secret !== expectedSecret) {
+        return reply.status(401).send({ error: "Secret invalide - ajoutez ?secret=generate123" });
+      }
+
+      // Résoudre le joueur: priorités -> playerId param > nickname param > header X-Player-ID > cookie guestId
+      let player = null as null | { id: string; nickname: string | null };
+
+      if (playerId) {
+        player = await prisma.player.findFirst({ where: { id: playerId, gameId }, select: { id: true, nickname: true } });
+      }
+
+      if (!player && nickname) {
+        player = await prisma.player.findFirst({ where: { gameId, nickname }, select: { id: true, nickname: true } });
+      }
+
+      if (!player) {
+        const headerId = req.headers['x-player-id'] as string | undefined;
+        if (headerId) {
+          player = await prisma.player.findFirst({ where: { id: headerId, gameId }, select: { id: true, nickname: true } });
+        }
+      }
+
+      if (!player) {
+        // Dernière chance: essayer via cookie guestId s'il est présent
+        const guestId = (req as any).cookies?.hm_guest as string | undefined;
+        if (guestId) {
+          player = await prisma.player.findFirst({ where: { gameId, guestId }, select: { id: true, nickname: true } });
+        }
+      }
+
+      if (!player) {
+        return reply.status(404).send({ error: "Joueur non trouvé pour cette partie" });
+      }
+
+      const updated = await prisma.player.update({
+        where: { id: player.id },
+        data: { quizTokens: { increment: amount } },
+        select: { id: true, quizTokens: true, nickname: true },
+      });
+
+      return reply.send({
+        success: true,
+        playerId: updated.id,
+        nickname: updated.nickname,
+        tokens: updated.quizTokens,
+        added: amount,
+        message: `${amount} token(s) ajouté(s)`,
+      });
+    } catch (err: any) {
+      app.log.error({ err }, "Erreur grant-tokens");
       return reply.status(500).send({ error: err.message });
     }
   });
