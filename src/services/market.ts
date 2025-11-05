@@ -358,6 +358,12 @@ export async function returnsBySymbol(
   gameId: string,
   windows: ReturnWindow[] = ["1d", "7d", "30d", "ytd"]
 ) {
+  // Auto-préparation: si aucun tick n'existe encore pour ce jeu, générer un historique de base
+  const existing = await prisma.marketTick.count({ where: { gameId } });
+  if (existing === 0) {
+    await ensureMarketHistory(gameId, 10).catch(() => {});
+  }
+
   const now = new Date();
   // 1) Dernier prix par symbole (1 requête)
   const lastRows = await prisma.$queryRaw<{ symbol: string; price: number }[]>`
