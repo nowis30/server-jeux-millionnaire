@@ -13,7 +13,7 @@ interface GeneratedQuestion {
   optionD: string;
   correctAnswer: 'A' | 'B' | 'C' | 'D';
   difficulty: 'easy' | 'medium' | 'hard';
-  category: 'finance' | 'economy' | 'real-estate' | 'business' | 'technology' | 'science' | 'history' | 'geography' | 'sports' | 'arts' | 'cinema' | 'music' | 'literature' | 'culture' | 'nature' | 'health' | 'food' | 'general';
+  category: 'finance' | 'economy' | 'real-estate' | 'business' | 'technology' | 'science' | 'history' | 'geography' | 'sports' | 'arts' | 'cinema' | 'music' | 'literature' | 'culture' | 'nature' | 'health' | 'food' | 'general' | 'animals' | 'translation';
   imageUrl?: string; // URL optionnelle d'une image illustrant la question
 }
 
@@ -36,6 +36,8 @@ Catégories disponibles:
 - health: Santé, nutrition, bien-être, anatomie
 - food: Cuisine, recettes, gastronomie, ingrédients
 - general: Culture générale variée, faits intéressants
+- animals: Zoologie, espèces, habitats, comportements, chaînes alimentaires
+- translation: Traduction FR/EN, faux amis, synonymes, expressions courantes
 
 Pour certaines questions, tu peux ajouter une image pour illustrer (personnage historique, monument, animal, œuvre d'art, etc.). Utilise des URLs d'images Unsplash ou Pexels en haute qualité.
 
@@ -94,7 +96,9 @@ const categoryPrompts = {
   nature: "Animaux, plantes, forêts, déserts, biodiversité, écologie",
   health: "Santé, nutrition, exercice, anatomie, maladies, bien-être",
   food: "Cuisine, recettes, ingrédients, restaurants, spécialités culinaires",
-  general: "Culture générale, faits intéressants, anecdotes, connaissances diverses"
+  general: "Culture générale, faits intéressants, anecdotes, connaissances diverses",
+  animals: "Zoologie, animaux domestiques et sauvages, habitats, chaînes alimentaires, comportements",
+  translation: "Traduction français-anglais, faux amis, synonymes, expressions idiomatiques, conjugaison simple"
 };
 
 /**
@@ -171,7 +175,7 @@ async function isDuplicate(question: string): Promise<boolean> {
  */
 export async function generateQuestionsWithAI(
   difficulty: 'easy' | 'medium' | 'hard',
-  category: 'finance' | 'economy' | 'real-estate' | 'business' | 'technology' | 'science' | 'history' | 'geography' | 'sports' | 'arts' | 'cinema' | 'music' | 'literature' | 'culture' | 'nature' | 'health' | 'food' | 'general',
+  category: 'finance' | 'economy' | 'real-estate' | 'business' | 'technology' | 'science' | 'history' | 'geography' | 'sports' | 'arts' | 'cinema' | 'music' | 'literature' | 'culture' | 'nature' | 'health' | 'food' | 'general' | 'animals' | 'translation',
   count: number = 5
 ): Promise<GeneratedQuestion[]> {
   
@@ -217,13 +221,16 @@ Réponds UNIQUEMENT avec le JSON, sans texte avant ou après.`;
     const parsed = JSON.parse(content);
     const questions = parsed.questions || [];
 
-    // Validation basique
+    // Validation basique: autoriser toutes les catégories supportées (pas uniquement finance/économie/immobilier)
+    const allowedCategories = [
+      'finance','economy','real-estate','business','technology','science','history','geography','sports','arts','cinema','music','literature','culture','nature','health','food','general','animals','translation'
+    ];
     const validQuestions = questions.filter((q: any) => 
       q.question && 
       q.optionA && q.optionB && q.optionC && q.optionD &&
       ['A', 'B', 'C', 'D'].includes(q.correctAnswer) &&
       ['easy', 'medium', 'hard'].includes(q.difficulty) &&
-      ['finance', 'economy', 'real-estate'].includes(q.category)
+      allowedCategories.includes(q.category)
     );
 
     console.log(`[AI] ${validQuestions.length}/${count} questions générées avec succès`);
@@ -252,7 +259,9 @@ export async function generateAndSaveQuestions(): Promise<number> {
       { difficulty: 'easy' as const, category: 'cinema' as const, count: 3 },
       { difficulty: 'easy' as const, category: 'music' as const, count: 3 },
       { difficulty: 'easy' as const, category: 'science' as const, count: 3 },
-      { difficulty: 'easy' as const, category: 'nature' as const, count: 3 },
+  { difficulty: 'easy' as const, category: 'nature' as const, count: 3 },
+  { difficulty: 'easy' as const, category: 'animals' as const, count: 3 },
+  { difficulty: 'easy' as const, category: 'translation' as const, count: 3 },
       { difficulty: 'easy' as const, category: 'food' as const, count: 3 },
       { difficulty: 'easy' as const, category: 'finance' as const, count: 2 },
       { difficulty: 'easy' as const, category: 'technology' as const, count: 2 },
@@ -272,7 +281,9 @@ export async function generateAndSaveQuestions(): Promise<number> {
       { difficulty: 'medium' as const, category: 'health' as const, count: 2 },
       { difficulty: 'medium' as const, category: 'economy' as const, count: 2 },
       { difficulty: 'medium' as const, category: 'music' as const, count: 2 },
-      { difficulty: 'medium' as const, category: 'nature' as const, count: 2 },
+  { difficulty: 'medium' as const, category: 'nature' as const, count: 2 },
+  { difficulty: 'medium' as const, category: 'animals' as const, count: 2 },
+  { difficulty: 'medium' as const, category: 'translation' as const, count: 2 },
       
       // Questions difficiles (25 questions) - Expertise requise
       { difficulty: 'hard' as const, category: 'science' as const, count: 4 },
