@@ -20,6 +20,7 @@ const getDifficultyForQuestion = (questionNumber: number): 'easy' | 'medium' | '
 };
 
 const COOLDOWN_MINUTES = 60;
+const MAX_QUESTIONS = 10;
 
 // Fonction pour sélectionner une question aléatoire non vue par le joueur
 async function selectUnseenQuestion(playerId: string, difficulty: string): Promise<any> {
@@ -426,7 +427,35 @@ export async function registerQuizRoutes(app: FastifyInstance) {
           },
         });
 
-        // Passer à la question suivante (pas de fin automatique)
+        // Si c'était la 10e question, terminer la session avec réussite
+        if (session.currentQuestion >= MAX_QUESTIONS) {
+          await prisma.quizSession.update({
+            where: { id: session.id },
+            data: {
+              status: 'completed',
+              currentEarnings: prizeAfter,
+              securedAmount: prizeAfter,
+              completedAt: new Date(),
+            },
+          });
+
+          await prisma.player.update({
+            where: { id: session.playerId },
+            data: {
+              cash: { increment: prizeAfter },
+              netWorth: { increment: prizeAfter },
+            },
+          });
+
+          return reply.send({
+            correct: true,
+            completed: true,
+            finalPrize: prizeAfter,
+            message: `Bravo ! Vous avez gagné $${prizeAfter.toLocaleString()} (10/10).`,
+          });
+        }
+
+        // Passer à la question suivante
         await prisma.quizSession.update({
           where: { id: session.id },
           data: {

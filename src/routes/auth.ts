@@ -24,14 +24,20 @@ export async function registerAuthRoutes(app: FastifyInstance) {
 
   // register
   app.post("/api/auth/register", async (req, reply) => {
-    const { email, password } = RegisterSchema.parse((req as any).body ?? {});
-    const existing = await prisma.user.findUnique({ where: { email } });
+    const parsed = RegisterSchema.parse((req as any).body ?? {});
+    const rawEmail = String(parsed.email || "").trim();
+    const emailNorm = rawEmail.toLowerCase();
+    const password = parsed.password;
+
+    // Empêcher les doublons quelle que soit la casse
+    const existing = await prisma.user.findFirst({ where: { email: { equals: rawEmail, mode: 'insensitive' } } });
     if (existing) return reply.status(409).send({ error: "Email déjà utilisé" });
+
     const passwordHash = await bcrypt.hash(password, 10);
-    const isAdmin = !!env.ADMIN_EMAIL && email.toLowerCase() === env.ADMIN_EMAIL.toLowerCase();
+    const isAdmin = !!env.ADMIN_EMAIL && emailNorm === env.ADMIN_EMAIL.toLowerCase();
     // Tous les comptes sont automatiquement vérifiés (pas d'email de vérification)
     const user = await (prisma as any).user.create({ 
-      data: { email, passwordHash, isAdmin, emailVerified: true } 
+      data: { email: emailNorm, passwordHash, isAdmin, emailVerified: true } 
     });
     // Créer un token JWT et connecter l'utilisateur immédiatement
     const token = (app as any).jwt.sign({ sub: user.id, email: user.email, isAdmin: user.isAdmin }, { expiresIn: "12h" });
@@ -44,8 +50,13 @@ export async function registerAuthRoutes(app: FastifyInstance) {
 
   // login
   app.post("/api/auth/login", async (req, reply) => {
-    const { email, password } = LoginSchema.parse((req as any).body ?? {});
-  const user = await prisma.user.findUnique({ where: { email } });
+    const parsed = LoginSchema.parse((req as any).body ?? {});
+    const rawEmail = String(parsed.email || "").trim();
+    const emailNorm = rawEmail.toLowerCase();
+    const password = parsed.password;
+
+    // Recherche insensible à la casse pour tolérer les anciens comptes
+    const user = await prisma.user.findFirst({ where: { email: { equals: rawEmail, mode: 'insensitive' } } });
     if (!user) return reply.status(401).send({ error: "Identifiants invalides" });
     const ok = await bcrypt.compare(password, user.passwordHash);
     if (!ok) return reply.status(401).send({ error: "Identifiants invalides" });
