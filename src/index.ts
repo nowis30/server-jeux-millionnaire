@@ -21,6 +21,7 @@ import path from "path";
 import { prisma as prismaClient } from "./prisma";
 import { computeWeeklyMortgage } from "./services/simulation";
 import { registerEconomyRoutes } from "./routes/economy";
+import { cleanupMarketTicks } from "./services/tickCleanup";
 
 async function bootstrap() {
   // Exécuter les migrations Prisma au démarrage (idempotent). Utile sur Render sans shell.
@@ -269,6 +270,23 @@ async function bootstrap() {
     for (const g of games) {
       const appr = 0.02 + Math.random() * 0.03; // 2% à 5%
       await (prisma as any).game.update({ where: { id: g.id }, data: { appreciationAnnual: appr } });
+    }
+  }, { timezone: env.TIMEZONE });
+
+  // Nettoyage automatique des ticks de marché toutes les 20 minutes
+  // Garde les 100 derniers ticks + 1 sur 100 des anciens pour chaque symbole
+  cron.schedule("*/20 * * * *", async () => {
+    app.log.info("[cron] cleanup market ticks (every 20 min)");
+    const games = await prisma.game.findMany({ where: { status: "running" } }).catch(() => []);
+    for (const g of games) {
+      try {
+        const deleted = await cleanupMarketTicks(g.id);
+        if (deleted > 0) {
+          app.log.info({ gameId: g.id, deleted }, "Ticks nettoyés automatiquement");
+        }
+      } catch (err) {
+        app.log.error({ gameId: g.id, err }, "Erreur nettoyage automatique ticks");
+      }
     }
   }, { timezone: env.TIMEZONE });
 

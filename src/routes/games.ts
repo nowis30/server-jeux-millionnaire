@@ -5,6 +5,7 @@ import { z } from "zod";
 import { INITIAL_CASH } from "../shared/constants";
 import { customAlphabet } from "nanoid";
 import { requireAdmin, requireUser } from "./auth";
+import { cleanupMarketTicks } from "../services/tickCleanup";
 
 const codeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const codeGenerator = customAlphabet(codeAlphabet, 6);
@@ -380,52 +381,8 @@ export async function registerGameRoutes(app: FastifyInstance) {
     const { id } = paramsSchema.parse((req as any).params);
     
     try {
-      let totalDeleted = 0;
-      const symbols = ["SP500", "QQQ", "TSX", "GLD", "TLT"];
-      
-      for (const symbol of symbols) {
-        // 1. Récupérer tous les ticks triés par date décroissante
-        const allTicks = await prisma.marketTick.findMany({
-          where: { gameId: id, symbol },
-          orderBy: { at: "desc" },
-          select: { id: true, at: true },
-        });
-        
-        if (allTicks.length <= 100) {
-          app.log.info({ symbol, count: allTicks.length }, "Pas assez de ticks pour nettoyer");
-          continue;
-        }
-        
-        // 2. Garder les 100 derniers (plus récents)
-        const keepRecent = allTicks.slice(0, 100).map(t => t.id);
-        
-        // 3. Pour les anciens (index 100+), garder 1 sur 100
-        const oldTicks = allTicks.slice(100);
-        const keepSampled = oldTicks
-          .filter((_, index) => index % 100 === 0)
-          .map(t => t.id);
-        
-        // 4. Combiner les deux listes
-        const keepIds = [...keepRecent, ...keepSampled];
-        
-        // 5. Supprimer tous les autres
-        const result = await prisma.marketTick.deleteMany({
-          where: {
-            gameId: id,
-            symbol,
-            id: { notIn: keepIds },
-          },
-        });
-        
-        totalDeleted += result.count;
-        app.log.info({ 
-          symbol, 
-          total: allTicks.length, 
-          kept: keepIds.length, 
-          deleted: result.count 
-        }, "Nettoyage ticks avec échantillonnage");
-      }
-      
+      const totalDeleted = await cleanupMarketTicks(id);
+      app.log.info({ gameId: id, totalDeleted }, "Nettoyage ticks terminé");
       return reply.send({ ok: true, totalDeleted });
     } catch (err: any) {
       app.log.error({ err }, "Erreur nettoyage ticks");
