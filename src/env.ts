@@ -14,6 +14,7 @@ export const env = {
   PORT: Number(process.env.PORT ?? 3001),
   DATABASE_URL: process.env.DATABASE_URL ?? "",
   CRON_TICK: process.env.CRON_TICK ?? "0 * * * *",
+  MARKET_TICK_CRON: process.env.MARKET_TICK_CRON ?? "0 */12 * * * *", // par défaut: 1 tick boursier toutes les 12 min (~5 j de bourse/heure)
   TIMEZONE: process.env.TIMEZONE ?? "America/Toronto",
   NODE_ENV: process.env.NODE_ENV ?? "development",
   JWT_SECRET: process.env.JWT_SECRET ?? "dev-secret-change-me",

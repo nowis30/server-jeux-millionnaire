@@ -143,11 +143,13 @@ function randn(rng: () => number) {
 // Paramètres par actif (drift annuel et volatilité annuelle approximatifs)
 function assetParams(symbol: MarketSymbol) {
   switch (symbol) {
-    case "SP500": return { driftA: 0.07, volA: 0.18 };
-    case "QQQ": return { driftA: 0.09, volA: 0.25 };
-    case "TSX": return { driftA: 0.06, volA: 0.16 };
-    case "GLD": return { driftA: 0.04, volA: 0.15 };
-    case "TLT": return { driftA: 0.03, volA: 0.12 }; // obligations long terme
+    // Valeurs nominales de long terme approximatives (50 ans):
+    // SP500 ~10%, QQQ ~12%, TSX ~8%, OR ~5%, Oblig. LT ~4%
+    case "SP500": return { driftA: 0.10, volA: 0.18 };
+    case "QQQ": return { driftA: 0.12, volA: 0.30 };
+    case "TSX": return { driftA: 0.08, volA: 0.17 };
+    case "GLD": return { driftA: 0.05, volA: 0.16 };
+    case "TLT": return { driftA: 0.04, volA: 0.12 }; // obligations long terme
     default: return { driftA: 0.05, volA: 0.2 } as const;
   }
 }
@@ -327,7 +329,10 @@ export async function getHistory(gameId: string, symbol: MarketSymbol, years = 5
 }
 
 // --- Rendements par actif sur fenêtres de temps ---
-export type ReturnWindow = "1h" | "1d" | "7d" | "30d" | "ytd";
+// Windows de rendement supportées
+// - fenêtres réelles: 1h, 1d, 7d, 30d, ytd
+// - fenêtres temps de jeu: g1d (1/7 h), g1w (1 h), g1y (52 h)
+export type ReturnWindow = "1h" | "1d" | "7d" | "30d" | "ytd" | "g1d" | "g1w" | "g1y";
 
 function windowStartDate(w: ReturnWindow): Date {
   const now = new Date();
@@ -338,6 +343,13 @@ function windowStartDate(w: ReturnWindow): Date {
     case "7d": d.setUTCDate(d.getUTCDate() - 7); break;
     case "30d": d.setUTCDate(d.getUTCDate() - 30); break;
     case "ytd": d.setUTCMonth(0, 1); d.setUTCHours(0,0,0,0); break;
+    // Fenêtres exprimées en temps de jeu (1 semaine de jeu = 1 heure réelle)
+    // g1d = 1 jour de jeu = 1/7 h réelle (~8 min 34 s)
+    case "g1d": d.setTime(d.getTime() - Math.round((60 * 60 * 1000) / 7)); break;
+    // g1w = 1 semaine de jeu = 1 h réelle
+    case "g1w": d.setUTCHours(d.getUTCHours() - 1); break;
+    // g1y = 1 an de jeu = 52 h réelles
+    case "g1y": d.setUTCHours(d.getUTCHours() - 52); break;
   }
   return d;
 }

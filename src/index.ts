@@ -228,9 +228,9 @@ async function bootstrap() {
     }
   }, { timezone: env.TIMEZONE });
 
-  // Cron marché: toutes les 10 secondes pour une démo rapide (~360 ticks/heure = ~1.4 années/heure)
-  // Chaque tick = 1 jour de bourse, donc 252 ticks = 1 an. 360 ticks/h / 252 = ~1.4 an/h.
-  const marketCron = "*/10 * * * * *";
+  // Cron marché: cadencé par MARKET_TICK_CRON (par défaut: toutes les 12 minutes)
+  // Objectif: ~5 jours de bourse par heure réelle (1 tick = 1 jour ouvré) => cohérent avec 1 semaine de jeu = 1h.
+  const marketCron = env.MARKET_TICK_CRON;
   cron.schedule(marketCron, async () => {
     app.log.info("[cron] market daily tick (every 10s)");
     const games = await prisma.game.findMany({ where: { status: "running" } }).catch(() => []);
