@@ -227,11 +227,11 @@ async function bootstrap() {
       // Mode sans fin: pas de condition de fin, la partie continue indéfiniment.
     }
 
-    // Réapprovisionnement auto des questions si le stock devient faible
+    // Réapprovisionnement auto des questions si le stock devient faible (≤ 300)
     try {
-      const { remaining, created } = await replenishIfLow(100);
+      const { remaining, created } = await replenishIfLow(300);
       if (created > 0) {
-        app.log.info({ remainingBefore: remaining, created }, "[cron] Quiz: stock faible → génération 20/questions par catégorie");
+        app.log.info({ remainingBefore: remaining, created }, "[cron] Quiz: stock faible (≤300) → génération 20/questions par catégorie");
       }
     } catch (e: any) {
       app.log.warn({ err: e?.message || e }, "[cron] replenishIfLow a échoué");

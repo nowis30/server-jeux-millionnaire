@@ -893,10 +893,10 @@ export async function registerQuizRoutes(app: FastifyInstance) {
       ]);
       const remainingAfter = Math.max(0, totalAfter - usedAfter);
 
-      // Réappro si demandé et stock faible
+      // Réappro si demandé et stock faible (≤ 300)
       let created = 0;
       if (replenish === 1) {
-        const res = await replenishIfLow(100);
+        const res = await replenishIfLow(300);
         created = res.created;
       }
 
