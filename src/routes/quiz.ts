@@ -116,17 +116,26 @@ export async function registerQuizRoutes(app: FastifyInstance) {
     const user = (req as any).user;
 
     try {
-      // Essayer de trouver le joueur via guestId (cookies) OU via header X-Player-ID (fallback pour iOS)
+      // Essayer de trouver le joueur via différentes méthodes (priorité : header > middleware > cookie)
       const playerIdHeader = req.headers['x-player-id'] as string | undefined;
+      const playerIdFromMiddleware = user.playerIdFromHeader as string | undefined;
       
       let player;
+      
+      // Priorité 1: Header X-Player-ID direct
       if (playerIdHeader) {
-        // iOS/Safari : utiliser le playerId du localStorage
         player = await prisma.player.findFirst({
           where: { id: playerIdHeader, gameId },
         });
-      } else if (user.guestId) {
-        // Android/Chrome : utiliser le cookie
+      }
+      // Priorité 2: Header passé par le middleware
+      else if (playerIdFromMiddleware) {
+        player = await prisma.player.findFirst({
+          where: { id: playerIdFromMiddleware, gameId },
+        });
+      }
+      // Priorité 3: Cookie guest (Android/Chrome)
+      else if (user.guestId) {
         player = await prisma.player.findFirst({
           where: { gameId, guestId: user.guestId },
         });
@@ -193,13 +202,19 @@ export async function registerQuizRoutes(app: FastifyInstance) {
     const user = (req as any).user;
 
     try {
-      // Support iOS : utiliser X-Player-ID header si disponible
+      // Support iOS : utiliser X-Player-ID header si disponible (priorités multiples)
       const playerIdHeader = req.headers['x-player-id'] as string | undefined;
+      const playerIdFromMiddleware = user.playerIdFromHeader as string | undefined;
       
       let player;
+      
       if (playerIdHeader) {
         player = await prisma.player.findFirst({
           where: { id: playerIdHeader, gameId },
+        });
+      } else if (playerIdFromMiddleware) {
+        player = await prisma.player.findFirst({
+          where: { id: playerIdFromMiddleware, gameId },
         });
       } else if (user.guestId) {
         player = await prisma.player.findFirst({

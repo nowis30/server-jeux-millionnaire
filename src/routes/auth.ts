@@ -309,6 +309,14 @@ export function requireUserOrGuest(app: FastifyInstance) {
         return; // Authentification réussie via cookie guest
       }
       
+      // iOS/Safari fallback: si on a un header X-Player-ID, c'est suffisant
+      // (la route individuelle devra valider que le player existe)
+      const playerIdHeader = req.headers['x-player-id'];
+      if (playerIdHeader) {
+        (req as any).user = { playerIdFromHeader: playerIdHeader };
+        return; // Authentification réussie via header
+      }
+      
       // Aucune authentification disponible
       return reply.status(401).send({ error: "Unauthenticated" });
     } catch (e) {
