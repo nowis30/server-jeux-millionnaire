@@ -169,8 +169,10 @@ export async function registerGameRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: "Cette action va effacer les joueurs, annonces, positions et ticks du marché de la partie. Ajoutez {confirm:true} pour continuer." });
     }
     // Effacer proprement les données liées à la partie
-  await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+    await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      // Ordre important: supprimer d'abord les tables qui référencent d'autres tables
       await tx.listing.deleteMany({ where: { gameId: id } });
+      await tx.dividendLog.deleteMany({ where: { gameId: id } });
       await tx.repairEvent.deleteMany({ where: { holding: { gameId: id } } });
       await tx.refinanceLog.deleteMany({ where: { holding: { gameId: id } } });
       await tx.propertyHolding.deleteMany({ where: { gameId: id } });
