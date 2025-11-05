@@ -22,6 +22,7 @@ import { prisma as prismaClient } from "./prisma";
 import { computeWeeklyMortgage } from "./services/simulation";
 import { registerEconomyRoutes } from "./routes/economy";
 import { cleanupMarketTicks } from "./services/tickCleanup";
+import { registerQuizRoutes } from "./routes/quiz";
 
 async function bootstrap() {
   // Exécuter les migrations Prisma au démarrage (idempotent). Utile sur Render sans shell.
@@ -160,6 +161,7 @@ async function bootstrap() {
   await registerHealthRoutes(app);
   await registerAuthRoutes(app);
   await registerEconomyRoutes(app);
+  await registerQuizRoutes(app);
   try {
     await registerDocs(app);
   } catch (e) {

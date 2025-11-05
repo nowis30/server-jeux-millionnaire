@@ -36,6 +36,7 @@ model Player {
   properties PropertyHolding[]
   markets    MarketHolding[]
   dividendLogs DividendLog[]
+  quizSessions QuizSession[]
 
   @@unique([gameId, guestId])
   @@unique([gameId, nickname])
@@ -59,6 +60,7 @@ model Game {
   listings    Listing[]
   marketHoldings MarketHolding[]
   dividendLogs DividendLog[]
+  quizSessions QuizSession[]
 }
 
 model PropertyTemplate {
@@ -188,4 +190,55 @@ model EmailVerificationToken {
   expiresAt DateTime
   usedAt    DateTime?
   createdAt DateTime @default(now())
+}
+
+// === QUIZ "Quitte ou Double" ===
+
+model QuizQuestion {
+  id          String   @id @default(cuid())
+  question    String
+  optionA     String
+  optionB     String
+  optionC     String
+  optionD     String
+  correctAnswer String  // 'A', 'B', 'C', ou 'D'
+  difficulty  String   // 'easy', 'medium', 'hard'
+  category    String   // 'finance', 'economy', 'real-estate'
+  createdAt   DateTime @default(now())
+  
+  attempts    QuizAttempt[]
+}
+
+model QuizSession {
+  id              String   @id @default(cuid())
+  player          Player   @relation(fields: [playerId], references: [id])
+  playerId        String
+  game            Game     @relation(fields: [gameId], references: [id])
+  gameId          String
+  status          String   @default("active") // active | completed | failed | cashed-out
+  currentQuestion Int      @default(1) // Question actuelle (1-15+)
+  currentEarnings Float    @default(0) // Gains accumulés
+  securedAmount   Float    @default(0) // Montant sécurisé au dernier palier
+  startedAt       DateTime @default(now())
+  completedAt     DateTime?
+  
+  attempts        QuizAttempt[]
+  
+  @@index([playerId, gameId, status])
+}
+
+model QuizAttempt {
+  id           String       @id @default(cuid())
+  session      QuizSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sessionId    String
+  question     QuizQuestion @relation(fields: [questionId], references: [id])
+  questionId   String
+  questionNumber Int        // Position dans la session (1, 2, 3...)
+  playerAnswer String?     // 'A', 'B', 'C', 'D' ou null si cash-out
+  isCorrect    Boolean?    // null si cash-out
+  prizeBefore  Float       // Gains avant cette question
+  prizeAfter   Float       // Gains après cette question
+  answeredAt   DateTime    @default(now())
+  
+  @@index([sessionId])
 }
