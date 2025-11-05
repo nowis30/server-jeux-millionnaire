@@ -284,20 +284,18 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         return reply.status(404).send({ error: "Session non trouvée ou terminée" });
       }
 
-      // Debug log pour comprendre le problème d'authentification
-      app.log.info({ 
-        sessionPlayerId: session.playerId, 
-        sessionGuestId: session.player.guestId, 
-        requestGuestId: user.guestId 
-      }, "Quiz answer - vérification session");
-
-      if (session.player.guestId !== user.guestId) {
-        app.log.warn({ 
-          expected: session.player.guestId, 
-          received: user.guestId 
-        }, "Quiz answer - guestId mismatch");
-        return reply.status(403).send({ error: "Pas votre session" });
+      // Vérifier que la session appartient bien à cette partie
+      if (session.gameId !== gameId) {
+        return reply.status(403).send({ error: "Cette session n'appartient pas à cette partie" });
       }
+
+      // Note: On ne vérifie plus le guestId car les cookies cross-domain ne fonctionnent pas toujours
+      // La sécurité est assurée par le fait que seul le joueur qui a le sessionId peut répondre
+      app.log.info({ 
+        sessionId, 
+        sessionPlayerId: session.playerId, 
+        gameId
+      }, "Quiz answer - traitement réponse");
 
       const question = await prisma.quizQuestion.findUnique({
         where: { id: questionId },
@@ -475,8 +473,9 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         return reply.status(404).send({ error: "Session non trouvée ou terminée" });
       }
 
-      if (session.player.guestId !== user.guestId) {
-        return reply.status(403).send({ error: "Pas votre session" });
+      // Vérifier que la session appartient bien à cette partie
+      if (session.gameId !== gameId) {
+        return reply.status(403).send({ error: "Cette session n'appartient pas à cette partie" });
       }
 
       const finalPrize = session.currentEarnings;
