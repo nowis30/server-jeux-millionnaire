@@ -212,14 +212,14 @@ async function bootstrap() {
     }
   }, { timezone: env.TIMEZONE });
 
-  // Cron marché: ~70 ticks par heure (toutes les ~51 secondes)
-  // Remarque: node-cron accepte les secondes (6 champs). 3600/51 ≈ 70,6 ticks/heure.
-  const seventyPerHour = "*/51 * * * * *";
-  cron.schedule(seventyPerHour, async () => {
-    app.log.info("[cron] market daily tick (~70/h)");
+  // Cron marché: toutes les 10 secondes pour une démo rapide (~360 ticks/heure = ~1.4 années/heure)
+  // Chaque tick = 1 jour de bourse, donc 252 ticks = 1 an. 360 ticks/h / 252 = ~1.4 an/h.
+  const marketCron = "*/10 * * * * *";
+  cron.schedule(marketCron, async () => {
+    app.log.info("[cron] market daily tick (every 10s)");
     const games = await prisma.game.findMany({ where: { status: "running" } }).catch(() => []);
     for (const g of games) {
-  await ensureMarketHistory(g.id, 10);
+      await ensureMarketHistory(g.id, 10);
       await dailyMarketTick(g.id);
       // (désactivé) rotation d'annonces immobilières issues de la banque — on ne conserve que les annonces des joueurs
     }
