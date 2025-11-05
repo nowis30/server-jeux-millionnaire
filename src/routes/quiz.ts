@@ -19,69 +19,114 @@ const getDifficultyForQuestion = (questionNumber: number): 'easy' | 'medium' | '
   return 'hard';
 };
 
+// Catégories supportées (cohérentes avec la génération IA et les stats)
+const CATEGORIES = ["finance", "economy", "real-estate"] as const;
+type Category = typeof CATEGORIES[number];
+
+function shuffle<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
 const COOLDOWN_MINUTES = 60;
 const MAX_QUESTIONS = 10;
 
-// Fonction pour sélectionner une question aléatoire non vue par le joueur
-async function selectUnseenQuestion(playerId: string, difficulty: string): Promise<any> {
-  // Compter d'abord le total de questions de cette difficulté
-  const totalCount = await prisma.quizQuestion.count({
-    where: { difficulty },
+// Récupérer les catégories déjà utilisées dans la session courante
+async function getUsedCategoriesForSession(sessionId: string): Promise<Set<string>> {
+  const attempts = await prisma.quizAttempt.findMany({
+    where: { sessionId },
+    include: { question: { select: { category: true } } },
   });
-  
-  if (totalCount === 0) {
-    return null; // Aucune question de cette difficulté
+  const used = new Set<string>();
+  for (const a of attempts) {
+    if (a.question?.category) used.add(a.question.category);
   }
-  
-  // Récupérer les IDs des questions déjà vues pour cette difficulté
-  const seenQuestions = await prisma.quizQuestionSeen.findMany({
-    where: { 
-      playerId,
-      question: { difficulty }
-    },
+  return used;
+}
+
+// Sélection d'une question non vue par difficulté en mélangeant les sujets
+async function selectUnseenQuestion(playerId: string, difficulty: string, sessionId?: string): Promise<any> {
+  // Compter toutes les questions pour cette difficulté (toutes catégories confondues)
+  const totalCountAll = await prisma.quizQuestion.count({ where: { difficulty } });
+  if (totalCountAll === 0) return null;
+
+  // Toutes les questions déjà vues (pour cette difficulté)
+  const seenInDifficulty = await prisma.quizQuestionSeen.findMany({
+    where: { playerId, question: { difficulty } },
     select: { questionId: true },
   });
-  
-  const seenIds = seenQuestions.map(sq => sq.questionId);
-  const seenCount = seenIds.length;
-  
-  // Si le joueur a vu toutes les questions, réinitialiser
-  if (seenCount >= totalCount) {
-    await prisma.quizQuestionSeen.deleteMany({
-      where: {
-        playerId,
-        question: { difficulty },
-      },
-    });
-    // Prendre une question au hasard après réinitialisation
-    const skip = Math.floor(Math.random() * totalCount);
-    return await prisma.quizQuestion.findFirst({
-      where: { difficulty },
-      skip,
-    });
-  }
-  
-  // Il reste des questions non vues
-  const unseenCount = totalCount - seenCount;
-  
-  if (unseenCount > 0) {
-    // Prendre une question non vue au hasard
-    const skip = Math.floor(Math.random() * unseenCount);
-    return await prisma.quizQuestion.findFirst({
-      where: {
-        difficulty,
-        id: { notIn: seenIds },
-      },
-      skip,
-    });
-  }
-  
-  // Fallback: prendre n'importe quelle question (ne devrait jamais arriver)
-  const skip = Math.floor(Math.random() * totalCount);
-  return await prisma.quizQuestion.findFirst({
-    where: { difficulty },
-    skip,
+  const seenIdsAll = seenInDifficulty.map((s) => s.questionId);
+  const seenCountAll = seenIdsAll.length;
+
+  // Questions déjà posées globalement (utilisées dans au moins une tentative)
+  const globallyUsed = await prisma.quizAttempt.findMany({
+    where: { question: { difficulty } },
+    distinct: ["questionId"],
+    select: { questionId: true },
   });
+  const usedIdsAll = new Set(globallyUsed.map((g) => g.questionId));
+
+  // Si tout a été vu pour cette difficulté, on réinitialise et on prend au hasard
+  if (seenCountAll >= totalCountAll) {
+    await prisma.quizQuestionSeen.deleteMany({ where: { playerId, question: { difficulty } } });
+    const skip = Math.floor(Math.random() * totalCountAll);
+    // Éviter de sélectionner une question déjà posée globalement
+    const q = await prisma.quizQuestion.findFirst({ where: { difficulty, id: { notIn: Array.from(usedIdsAll) } }, skip });
+    if (q) return q;
+    // Si tout est utilisé globalement, on ne peut plus en fournir
+    return null;
+  }
+
+  // Ordre des catégories à essayer: celles pas encore vues dans la session d'abord (pour maximiser la diversité)
+  let categoriesOrder: string[] = [...CATEGORIES];
+  if (sessionId) {
+    const usedInSession = await getUsedCategoriesForSession(sessionId);
+    const notUsed = CATEGORIES.filter((c) => !usedInSession.has(c));
+    const alreadyUsed = CATEGORIES.filter((c) => usedInSession.has(c));
+    categoriesOrder = [...shuffle(notUsed), ...shuffle(alreadyUsed)];
+  } else {
+    categoriesOrder = shuffle(categoriesOrder);
+  }
+
+  // Essayer de choisir une question non vue par catégorie dans l'ordre calculé
+  for (const category of categoriesOrder) {
+    const totalCountCat = await prisma.quizQuestion.count({ where: { difficulty, category } });
+    if (totalCountCat === 0) continue;
+
+    const seenInCat = await prisma.quizQuestionSeen.findMany({
+      where: { playerId, question: { difficulty, category } },
+      select: { questionId: true },
+    });
+    const seenIdsCat = seenInCat.map((s) => s.questionId);
+    const excludedIdsCat = new Set([...seenIdsCat, ...Array.from(usedIdsAll)]);
+    const unseenCountCat = totalCountCat - seenIdsCat.length;
+    if (unseenCountCat <= 0) continue;
+
+    const skip = Math.floor(Math.random() * unseenCountCat);
+    const q = await prisma.quizQuestion.findFirst({
+      where: { difficulty, category, id: { notIn: Array.from(excludedIdsCat) } },
+      skip,
+    });
+    if (q) return q;
+  }
+
+  // Fallback: choisir n'importe quelle question non vue pour la difficulté (toutes catégories)
+  const excludedAll = Array.from(new Set([...seenIdsAll, ...Array.from(usedIdsAll)]));
+  const unseenCountAll = totalCountAll - excludedAll.length;
+  if (unseenCountAll > 0) {
+    const skip = Math.floor(Math.random() * unseenCountAll);
+    return await prisma.quizQuestion.findFirst({
+      where: { difficulty, id: { notIn: excludedAll } },
+      skip,
+    });
+  }
+
+  // Dernier recours (ne devrait pas arriver car on a géré la réinitialisation): aléatoire dans la difficulté
+  return null;
 }
 
 // Fonction pour marquer une question comme vue
@@ -257,8 +302,8 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         throw err;
       }
 
-      // Récupérer une question facile non vue
-      const question = await selectUnseenQuestion(player.id, 'easy');
+  // Récupérer une question facile non vue (avec mélange des sujets)
+  const question = await selectUnseenQuestion(player.id, 'easy', session.id);
 
       if (!question) {
         // Rembourser le token si aucune question disponible
@@ -327,8 +372,8 @@ export async function registerQuizRoutes(app: FastifyInstance) {
   // Déterminer la difficulté à partir de la question courante (règle dynamique)
   const difficulty = getDifficultyForQuestion(activeSession.currentQuestion);
 
-      // Sélectionner une question non vue
-      const question = await selectUnseenQuestion(player.id, difficulty);
+    // Sélectionner une question non vue avec mélange des sujets
+    const question = await selectUnseenQuestion(player.id, difficulty, activeSession.id);
       if (!question) {
         return reply.status(500).send({ error: "Aucune question disponible pour reprise" });
       }
@@ -465,9 +510,9 @@ export async function registerQuizRoutes(app: FastifyInstance) {
           },
         });
 
-  // Récupérer la prochaine question (non vue)
+  // Récupérer la prochaine question (non vue) avec mélange des sujets
   const nextDifficulty = getDifficultyForQuestion(session.currentQuestion + 1);
-  const nextQuestion = await selectUnseenQuestion(session.player.id, nextDifficulty);
+  const nextQuestion = await selectUnseenQuestion(session.player.id, nextDifficulty, session.id);
 
         if (!nextQuestion) {
           return reply.status(500).send({ error: "Erreur chargement question suivante" });
@@ -631,10 +676,39 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         prisma.quizQuestion.count({ where: { category: 'real-estate' } }),
       ]);
 
+      // Distinct questions déjà posées globalement
+      const [usedTotal, usedEasy, usedMedium, usedHard] = await Promise.all([
+        prisma.quizAttempt.findMany({ distinct: ["questionId"], select: { questionId: true } }).then(r => r.length),
+        prisma.quizAttempt.findMany({ where: { question: { difficulty: 'easy' } }, distinct: ["questionId"], select: { questionId: true } }).then(r => r.length),
+        prisma.quizAttempt.findMany({ where: { question: { difficulty: 'medium' } }, distinct: ["questionId"], select: { questionId: true } }).then(r => r.length),
+        prisma.quizAttempt.findMany({ where: { question: { difficulty: 'hard' } }, distinct: ["questionId"], select: { questionId: true } }).then(r => r.length),
+      ]);
+
+      const remaining = Math.max(0, total - usedTotal);
+      const remainingByDifficulty = {
+        easy: Math.max(0, easy - usedEasy),
+        medium: Math.max(0, medium - usedMedium),
+        hard: Math.max(0, hard - usedHard),
+      } as const;
+
+      const [usedFinance, usedEconomy, usedRealEstate] = await Promise.all([
+        prisma.quizAttempt.findMany({ where: { question: { category: 'finance' } }, distinct: ["questionId"], select: { questionId: true } }).then(r => r.length),
+        prisma.quizAttempt.findMany({ where: { question: { category: 'economy' } }, distinct: ["questionId"], select: { questionId: true } }).then(r => r.length),
+        prisma.quizAttempt.findMany({ where: { question: { category: 'real-estate' } }, distinct: ["questionId"], select: { questionId: true } }).then(r => r.length),
+      ]);
+      const remainingByCategory = {
+        finance: Math.max(0, finance - usedFinance),
+        economy: Math.max(0, economy - usedEconomy),
+        realEstate: Math.max(0, realEstate - usedRealEstate),
+      } as const;
+
       return reply.send({
         total,
         byDifficulty: { easy, medium, hard },
         byCategory: { finance, economy, realEstate },
+        remaining,
+        remainingByDifficulty,
+        remainingByCategory,
       });
     } catch (err: any) {
       app.log.error({ err }, "Erreur stats questions");
@@ -655,6 +729,32 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         prisma.quizQuestion.count({ where: { category: 'real-estate' } }),
       ]);
 
+      // Distinct questions déjà posées globalement
+      const [usedTotal, usedEasy, usedMedium, usedHard] = await Promise.all([
+        prisma.quizAttempt.findMany({ distinct: ["questionId"], select: { questionId: true } }).then(r => r.length),
+        prisma.quizAttempt.findMany({ where: { question: { difficulty: 'easy' } }, distinct: ["questionId"], select: { questionId: true } }).then(r => r.length),
+        prisma.quizAttempt.findMany({ where: { question: { difficulty: 'medium' } }, distinct: ["questionId"], select: { questionId: true } }).then(r => r.length),
+        prisma.quizAttempt.findMany({ where: { question: { difficulty: 'hard' } }, distinct: ["questionId"], select: { questionId: true } }).then(r => r.length),
+      ]);
+
+      const remaining = Math.max(0, total - usedTotal);
+      const remainingByDifficulty = {
+        easy: Math.max(0, easy - usedEasy),
+        medium: Math.max(0, medium - usedMedium),
+        hard: Math.max(0, hard - usedHard),
+      } as const;
+
+      const [usedFinance, usedEconomy, usedRealEstate] = await Promise.all([
+        prisma.quizAttempt.findMany({ where: { question: { category: 'finance' } }, distinct: ["questionId"], select: { questionId: true } }).then(r => r.length),
+        prisma.quizAttempt.findMany({ where: { question: { category: 'economy' } }, distinct: ["questionId"], select: { questionId: true } }).then(r => r.length),
+        prisma.quizAttempt.findMany({ where: { question: { category: 'real-estate' } }, distinct: ["questionId"], select: { questionId: true } }).then(r => r.length),
+      ]);
+      const remainingByCategory = {
+        finance: Math.max(0, finance - usedFinance),
+        economy: Math.max(0, economy - usedEconomy),
+        realEstate: Math.max(0, realEstate - usedRealEstate),
+      } as const;
+
       return reply.send({
         questions: total,
         easy,
@@ -663,6 +763,9 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         finance,
         economy,
         realEstate,
+        remaining,
+        remainingByDifficulty,
+        remainingByCategory,
       });
     } catch (err: any) {
       app.log.error({ err }, "Erreur stats questions publiques");
