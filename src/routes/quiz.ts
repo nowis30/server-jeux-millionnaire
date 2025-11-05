@@ -284,7 +284,18 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         return reply.status(404).send({ error: "Session non trouvée ou terminée" });
       }
 
+      // Debug log pour comprendre le problème d'authentification
+      app.log.info({ 
+        sessionPlayerId: session.playerId, 
+        sessionGuestId: session.player.guestId, 
+        requestGuestId: user.guestId 
+      }, "Quiz answer - vérification session");
+
       if (session.player.guestId !== user.guestId) {
+        app.log.warn({ 
+          expected: session.player.guestId, 
+          received: user.guestId 
+        }, "Quiz answer - guestId mismatch");
         return reply.status(403).send({ error: "Pas votre session" });
       }
 
