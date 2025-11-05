@@ -107,9 +107,11 @@ export async function registerGameRoutes(app: FastifyInstance) {
       }
     } else {
       // Nouveau joueur : essayer de lire le cookie, sinon en créer un
-      guestId = (req as any).cookies?.["hm_guest"] as string | undefined;
+      const cookieGuestId = (req as any).cookies?.["hm_guest"] as string | undefined;
       
-      if (!guestId) {
+      if (cookieGuestId) {
+        guestId = cookieGuestId;
+      } else {
         const { nanoid } = await import("nanoid");
         guestId = nanoid();
         (reply as any).setCookie?.("hm_guest", guestId, { 
