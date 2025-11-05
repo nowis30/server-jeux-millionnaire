@@ -675,4 +675,44 @@ export async function registerQuizRoutes(app: FastifyInstance) {
       return reply.status(500).send({ error: err.message });
     }
   });
+  
+  // GET /api/quiz/reset-seen - Réinitialiser les questions vues (admin ou secret)
+  app.get("/api/quiz/reset-seen", async (req, reply) => {
+    try {
+      const querySchema = z.object({ 
+        secret: z.string().optional(),
+        playerId: z.string().optional() 
+      });
+      const { secret, playerId } = querySchema.parse((req as any).query || {});
+      
+      const expectedSecret = process.env.QUIZ_GENERATION_SECRET || "generate123";
+      if (secret !== expectedSecret) {
+        return reply.status(401).send({ error: "Secret invalide - ajoutez ?secret=generate123" });
+      }
+
+      app.log.info("🔄 Réinitialisation des questions vues");
+      
+      let deleted;
+      if (playerId) {
+        // Réinitialiser pour un joueur spécifique
+        deleted = await prisma.quizQuestionSeen.deleteMany({
+          where: { playerId }
+        });
+        app.log.info({ playerId, count: deleted.count }, "Questions vues réinitialisées pour un joueur");
+      } else {
+        // Réinitialiser pour tous les joueurs
+        deleted = await prisma.quizQuestionSeen.deleteMany({});
+        app.log.info({ count: deleted.count }, "Questions vues réinitialisées pour tous");
+      }
+      
+      return reply.send({
+        success: true,
+        deleted: deleted.count,
+        message: `${deleted.count} entrées supprimées`,
+      });
+    } catch (err: any) {
+      app.log.error({ err }, "Erreur réinitialisation questions vues");
+      return reply.status(500).send({ error: err.message });
+    }
+  });
 }
