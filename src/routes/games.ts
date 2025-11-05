@@ -309,6 +309,66 @@ export async function registerGameRoutes(app: FastifyInstance) {
     
     return reply.send({ gameId: id, counts });
   });
+
+  // Endpoint admin: nettoyer les vieux ticks de marché avec échantillonnage
+  // Stratégie: garder les 100 derniers ticks complets + 1 tick sur 100 des anciens (historique long terme)
+  app.post("/api/games/:id/cleanup-ticks", { preHandler: requireAdmin(app) }, async (req, reply) => {
+    const paramsSchema = z.object({ id: z.string() });
+    const { id } = paramsSchema.parse((req as any).params);
+    
+    try {
+      let totalDeleted = 0;
+      const symbols = ["SP500", "QQQ", "TSX", "GLD", "TLT"];
+      
+      for (const symbol of symbols) {
+        // 1. Récupérer tous les ticks triés par date décroissante
+        const allTicks = await prisma.marketTick.findMany({
+          where: { gameId: id, symbol },
+          orderBy: { at: "desc" },
+          select: { id: true, at: true },
+        });
+        
+        if (allTicks.length <= 100) {
+          app.log.info({ symbol, count: allTicks.length }, "Pas assez de ticks pour nettoyer");
+          continue;
+        }
+        
+        // 2. Garder les 100 derniers (plus récents)
+        const keepRecent = allTicks.slice(0, 100).map(t => t.id);
+        
+        // 3. Pour les anciens (index 100+), garder 1 sur 100
+        const oldTicks = allTicks.slice(100);
+        const keepSampled = oldTicks
+          .filter((_, index) => index % 100 === 0)
+          .map(t => t.id);
+        
+        // 4. Combiner les deux listes
+        const keepIds = [...keepRecent, ...keepSampled];
+        
+        // 5. Supprimer tous les autres
+        const result = await prisma.marketTick.deleteMany({
+          where: {
+            gameId: id,
+            symbol,
+            id: { notIn: keepIds },
+          },
+        });
+        
+        totalDeleted += result.count;
+        app.log.info({ 
+          symbol, 
+          total: allTicks.length, 
+          kept: keepIds.length, 
+          deleted: result.count 
+        }, "Nettoyage ticks avec échantillonnage");
+      }
+      
+      return reply.send({ ok: true, totalDeleted });
+    } catch (err: any) {
+      app.log.error({ err }, "Erreur nettoyage ticks");
+      return reply.status(500).send({ error: err.message });
+    }
+  });
 }
 
 function generateCode() {
