@@ -6,6 +6,7 @@ import { INITIAL_CASH } from "../shared/constants";
 import { customAlphabet } from "nanoid";
 import { requireAdmin, requireUser } from "./auth";
 import { cleanupMarketTicks } from "../services/tickCleanup";
+import { getOnlineCount } from "../socket";
 
 const codeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const codeGenerator = customAlphabet(codeAlphabet, 6);
@@ -26,6 +27,14 @@ export async function registerGameRoutes(app: FastifyInstance) {
       createdAt: g.createdAt,
     }];
     return reply.send({ games: payload });
+  });
+
+  // Nombre de joueurs connectés (Socket.IO) pour une partie
+  app.get("/api/games/:id/online", async (req, reply) => {
+    const paramsSchema = z.object({ id: z.string() });
+    const { id } = paramsSchema.parse((req as any).params);
+    const online = getOnlineCount(id);
+    return reply.send({ gameId: id, online });
   });
 
   // Créer une partie (option: créer aussi l'hôte pour le cookie invité courant)

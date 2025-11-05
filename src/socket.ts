@@ -37,10 +37,41 @@ export function setupSocket(server: HTTPServer) {
   ioRef = io;
 
   io.on("connection", (socket) => {
-    const { gameId } = socket.handshake.query as { gameId?: string };
-    if (gameId) socket.join(`game:${gameId}`);
+    // Suivi des rooms game:* pour ce socket
+    (socket.data as any).joinedGames = new Set<string>();
 
-    socket.on("join-game", (gid: string) => socket.join(`game:${gid}`));
+    function inc(gid: string) {
+      const cur = onlineByGame.get(gid) || 0;
+      onlineByGame.set(gid, cur + 1);
+      io.to(`game:${gid}`).emit("online-count", { gameId: gid, online: cur + 1 });
+    }
+    function dec(gid: string) {
+      const cur = onlineByGame.get(gid) || 0;
+      const next = Math.max(0, cur - 1);
+      onlineByGame.set(gid, next);
+      io.to(`game:${gid}`).emit("online-count", { gameId: gid, online: next });
+    }
+
+    const { gameId } = socket.handshake.query as { gameId?: string };
+    if (gameId) {
+      socket.join(`game:${gameId}`);
+      (socket.data as any).joinedGames.add(gameId);
+      inc(gameId);
+    }
+
+    socket.on("join-game", (gid: string) => {
+      if (!gid) return;
+      if (!(socket.data as any).joinedGames.has(gid)) {
+        socket.join(`game:${gid}`);
+        (socket.data as any).joinedGames.add(gid);
+        inc(gid);
+      }
+    });
+
+    socket.on("disconnecting", () => {
+      const joined: Set<string> = (socket.data as any).joinedGames || new Set();
+      for (const gid of joined) dec(gid);
+    });
   });
 
   return {
@@ -62,4 +93,10 @@ export function sendEventFeed(gameId: string, event: any) {
   try {
     ioRef?.to(`game:${gameId}`).emit("event-feed", event);
   } catch {}
+}
+
+// Compteurs en ligne par partie
+const onlineByGame = new Map<string, number>();
+export function getOnlineCount(gameId: string): number {
+  return onlineByGame.get(gameId) || 0;
 }
