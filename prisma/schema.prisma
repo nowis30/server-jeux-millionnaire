@@ -26,6 +26,10 @@ model Player {
   netWorth  Float    @default(1000000)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  
+  // Système de tokens pour le quiz
+  quizTokens Int      @default(1) // Nombre de tokens disponibles pour jouer au quiz
+  lastTokenEarnedAt DateTime @default(now()) // Dernière fois qu'un token a été gagné
 
   game   Game?   @relation(fields: [gameId], references: [id])
   gameId String?

@@ -9,6 +9,7 @@ Ce document liste toutes les tâches planifiées qui s'exécutent automatiquemen
 | **Tick de marché** | Toutes les 10 secondes | `*/10 * * * * *` | Met à jour les prix des actifs boursiers |
 | **Nettoyage des ticks** | Toutes les 20 minutes | `*/20 * * * *` | Supprime les anciens ticks (garde 100 récents + échantillonnage) |
 | **Génération IA questions** | Toutes les heures | `0 * * * *` | Génère 10 nouvelles questions quiz avec OpenAI |
+| **Distribution tokens quiz** | Toutes les minutes | `* * * * *` | Distribue 1 token/heure aux joueurs actifs |
 
 ## Détails des tâches
 
@@ -172,7 +173,56 @@ grep "[cron]" logs.txt
 # [cron] Market tick completed for game 1 (symbol: SP500, price: 450.23)
 # [cron] Tick cleanup: { deleted: 5432, kept: 500 }
 # [cron] AI generation: 10 questions created
+# [cron] Tokens distribués: 5 token(s) pour 3 joueur(s)
 ```
+
+---
+
+### 4. Distribution des tokens quiz (Token Distribution)
+
+**Fichier**: `server/src/index.ts` (ligne ~307)
+
+```typescript
+cron.schedule("* * * * *", async () => {
+  try {
+    const { distributeTokensToActivePlayers } = await import("./services/quizTokens");
+    await distributeTokensToActivePlayers();
+  } catch (err) {
+    app.log.error({ err }, "Erreur distribution tokens quiz");
+  }
+});
+```
+
+**Description**:
+- Exécution: **Toutes les minutes** (60 fois par heure, 1440 fois par jour)
+- Objectif: Distribuer automatiquement les tokens gagnés aux joueurs
+- Règle: Chaque joueur gagne **1 token par heure** (consommé pour jouer au quiz)
+
+**Processus** :
+1. Récupère tous les jeux actifs
+2. Pour chaque joueur de ces jeux :
+   - Calcule le temps depuis `lastTokenEarnedAt`
+   - Si ≥ 1 heure → Ajoute 1 token
+   - Met à jour `quizTokens` et `lastTokenEarnedAt`
+3. Log le nombre de tokens distribués
+
+**Exemple de résultat**:
+```
+[cron] Tokens distribués: 5 token(s) pour 3 joueur(s)
+[tokens] Joueur clxxx a gagné 2 token(s). Total: 5
+```
+
+**Caractéristiques** :
+- Distribution équitable (1 token/heure pour tous)
+- Accumulation illimitée (pas de plafond)
+- Skip silencieux si aucun token à distribuer
+- Performances optimisées (batch queries)
+
+**Fichier source**: `server/src/services/quizTokens.ts`
+
+**Documentation complète**: [QUIZ_TOKENS.md](./QUIZ_TOKENS.md)
+
+---
 
 ## Timezone
 

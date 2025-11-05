@@ -307,6 +307,17 @@ async function bootstrap() {
     }
   }, { timezone: env.TIMEZONE });
 
+  // Distribution automatique de tokens quiz toutes les minutes
+  // Vérifie et distribue les tokens gagnés automatiquement aux joueurs actifs
+  cron.schedule("* * * * *", async () => {
+    try {
+      const { distributeTokensToActivePlayers } = await import("./services/quizTokens");
+      await distributeTokensToActivePlayers();
+    } catch (err) {
+      app.log.error({ err }, "Erreur distribution tokens quiz");
+    }
+  }, { timezone: env.TIMEZONE });
+
   // Écoute HTTP d'abord pour que Render détecte le port rapidement
   await app.listen({ port: env.PORT, host: "0.0.0.0" });
   app.log.info({ port: env.PORT }, "HTTP server listening");

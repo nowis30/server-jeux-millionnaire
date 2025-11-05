@@ -3,6 +3,12 @@ import { prisma } from "../prisma";
 import { z } from "zod";
 import { requireUser, requireAdmin } from "./auth";
 import { generateAndSaveQuestions } from "../services/aiQuestions";
+import {
+  updatePlayerTokens,
+  consumeQuizToken,
+  refundQuizToken,
+  getTimeUntilNextToken,
+} from "../services/quizTokens";
 
 // Structure des gains par question (Quitte ou Double)
 const PRIZE_LADDER = [
@@ -119,6 +125,10 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         return reply.status(404).send({ error: "Joueur non trouvé" });
       }
 
+      // Mettre à jour les tokens du joueur (ajoute les tokens gagnés depuis la dernière vérification)
+      const currentTokens = await updatePlayerTokens(player.id);
+      const secondsUntilNextToken = await getTimeUntilNextToken(player.id);
+
       // Vérifier s'il y a une session active
       const activeSession = await prisma.quizSession.findFirst({
         where: {
@@ -139,6 +149,8 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         return reply.send({
           canPlay: true,
           hasActiveSession: true,
+          tokens: currentTokens,
+          secondsUntilNextToken,
           session: {
             id: activeSession.id,
             currentQuestion: activeSession.currentQuestion,
@@ -149,36 +161,12 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         });
       }
 
-      // Vérifier la dernière session terminée pour le cooldown
-      const lastSession = await prisma.quizSession.findFirst({
-        where: {
-          playerId: player.id,
-          gameId,
-          status: { in: ['completed', 'failed', 'cashed-out'] },
-        },
-        orderBy: { completedAt: 'desc' },
-      });
-
-      if (lastSession && lastSession.completedAt) {
-        const now = new Date();
-        const cooldownEnd = new Date(lastSession.completedAt.getTime() + COOLDOWN_MINUTES * 60 * 1000);
-        
-        if (now < cooldownEnd) {
-          const remainingMinutes = Math.ceil((cooldownEnd.getTime() - now.getTime()) / (60 * 1000));
-          return reply.send({
-            canPlay: false,
-            hasActiveSession: false,
-            cooldown: {
-              remainingMinutes,
-              nextAvailable: cooldownEnd.toISOString(),
-            },
-          });
-        }
-      }
-
+      // Pas de session active, retourner le statut des tokens
       return reply.send({
-        canPlay: true,
+        canPlay: currentTokens > 0,
         hasActiveSession: false,
+        tokens: currentTokens,
+        secondsUntilNextToken,
       });
 
     } catch (err: any) {
@@ -202,6 +190,9 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         return reply.status(404).send({ error: "Joueur non trouvé" });
       }
 
+      // Mettre à jour les tokens avant de vérifier
+      await updatePlayerTokens(player.id);
+
       // Vérifier qu'il n'y a pas de session active
       const existingActive = await prisma.quizSession.findFirst({
         where: { playerId: player.id, gameId, status: 'active' },
@@ -211,41 +202,38 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: "Vous avez déjà une session en cours" });
       }
 
-      // Vérifier le cooldown
-      const lastSession = await prisma.quizSession.findFirst({
-        where: {
-          playerId: player.id,
-          gameId,
-          status: { in: ['completed', 'failed', 'cashed-out'] },
-        },
-        orderBy: { completedAt: 'desc' },
-      });
-
-      if (lastSession && lastSession.completedAt) {
-        const now = new Date();
-        const cooldownEnd = new Date(lastSession.completedAt.getTime() + COOLDOWN_MINUTES * 60 * 1000);
-        
-        if (now < cooldownEnd) {
-          return reply.status(429).send({ error: "Veuillez attendre avant de rejouer" });
-        }
+      // Consommer un token
+      const tokenConsumed = await consumeQuizToken(player.id);
+      
+      if (!tokenConsumed) {
+        return reply.status(403).send({ error: "Pas assez de tokens. Attendez pour en gagner un nouveau." });
       }
 
       // Créer une nouvelle session
-      const session = await prisma.quizSession.create({
-        data: {
-          playerId: player.id,
-          gameId,
-          status: 'active',
-          currentQuestion: 1,
-          currentEarnings: 0,
-          securedAmount: 0,
-        },
-      });
+      let session;
+      try {
+        session = await prisma.quizSession.create({
+          data: {
+            playerId: player.id,
+            gameId,
+            status: 'active',
+            currentQuestion: 1,
+            currentEarnings: 0,
+            securedAmount: 0,
+          },
+        });
+      } catch (err: any) {
+        // Si la création échoue, rembourser le token
+        await refundQuizToken(player.id);
+        throw err;
+      }
 
       // Récupérer une question facile non vue
       const question = await selectUnseenQuestion(player.id, 'easy');
 
       if (!question) {
+        // Rembourser le token si aucune question disponible
+        await refundQuizToken(player.id);
         return reply.status(500).send({ error: "Aucune question disponible" });
       }
 

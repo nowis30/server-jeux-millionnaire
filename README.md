@@ -14,15 +14,15 @@ API backend pour le jeu de simulation économique multijoueur « Héritier Milli
 
 ### Quiz "Quitte ou Double" avec IA
 
+- **Système de tokens** : Les joueurs gagnent 1 token/heure automatiquement (consomment 1 token par session)
 - **35 questions de base** + **génération automatique IA** (10 questions/heure)
 - **Aucune répétition** : Système intelligent qui garantit que chaque joueur ne voit jamais deux fois la même question
 - **Paliers progressifs** : 5 faciles ($1k→$5k) → 5 moyennes ($10k→$50k) → difficiles ($75k→$5M+)
 - **Seuils de sécurité** : $5k, $50k, $500k, $5M (gains garantis)
-- **Cooldown** : 60 minutes entre chaque session
 - **IA OpenAI GPT-4o-mini** : Génération automatique pour questions toujours fraîches (~$5-9/mois)
 - **Catégories** : Finance, économie, immobilier
 - **Admin** : Endpoints pour génération manuelle et statistiques
-- 📚 [Documentation IA](./docs/AI_QUESTIONS.md) | 🚫 [Anti-répétition](./docs/QUIZ_NO_REPEAT.md)
+- 📚 [Documentation IA](./docs/AI_QUESTIONS.md) | 🚫 [Anti-répétition](./docs/QUIZ_NO_REPEAT.md) | 🎟️ [Système de tokens](./docs/QUIZ_TOKENS.md)
 
 ### Optimisations de performance
 
