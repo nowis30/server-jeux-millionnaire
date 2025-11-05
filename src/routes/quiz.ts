@@ -606,7 +606,8 @@ export async function registerQuizRoutes(app: FastifyInstance) {
   app.post("/api/quiz/trigger-generation", async (req, reply) => {
     try {
       const bodySchema = z.object({ secret: z.string().optional() });
-      const { secret } = bodySchema.parse((req as any).body || {});
+      const body = typeof (req as any).body === 'string' ? JSON.parse((req as any).body) : ((req as any).body || {});
+      const { secret } = bodySchema.parse(body);
       
       // Vérifier le secret (configurer QUIZ_GENERATION_SECRET dans .env)
       const expectedSecret = process.env.QUIZ_GENERATION_SECRET || "generate123";
@@ -624,6 +625,31 @@ export async function registerQuizRoutes(app: FastifyInstance) {
       });
     } catch (err: any) {
       app.log.error({ err }, "Erreur génération déclenchée");
+      return reply.status(500).send({ error: err.message });
+    }
+  });
+  
+  // GET /api/quiz/trigger-generation-get - Alternative GET pour tester facilement
+  app.get("/api/quiz/trigger-generation-get", async (req, reply) => {
+    try {
+      const querySchema = z.object({ secret: z.string().optional() });
+      const { secret } = querySchema.parse((req as any).query || {});
+      
+      const expectedSecret = process.env.QUIZ_GENERATION_SECRET || "generate123";
+      if (secret !== expectedSecret) {
+        return reply.status(401).send({ error: "Secret invalide - ajoutez ?secret=generate123" });
+      }
+
+      app.log.info("🤖 Génération de questions déclenchée via GET");
+      const created = await generateAndSaveQuestions();
+      
+      return reply.send({
+        success: true,
+        created,
+        message: `${created} questions générées avec succès`,
+      });
+    } catch (err: any) {
+      app.log.error({ err }, "Erreur génération GET");
       return reply.status(500).send({ error: err.message });
     }
   });
