@@ -68,36 +68,60 @@ export async function registerGameRoutes(app: FastifyInstance) {
   // Rejoindre une partie (par id) en liant le joueur au cookie invité
   app.post("/api/games/:id/join", { preHandler: requireUser(app) }, async (req, reply) => {
     const paramsSchema = z.object({ id: z.string() });
-  const bodySchema = z.object({ nickname: z.string().min(2).optional() });
+    const bodySchema = z.object({ nickname: z.string().min(2).optional() });
     const { id } = paramsSchema.parse((req as any).params);
-  bodySchema.parse((req as any).body ?? {});
+    bodySchema.parse((req as any).body ?? {});
 
     const game = await prisma.game.findUnique({ where: { id } });
     if (!game) return reply.status(404).send({ error: "Game not found" });
-  // Partie unique: autoriser le join même si la partie est en cours
+    // Partie unique: autoriser le join même si la partie est en cours
 
-    let guestId = (req as any).cookies?.["hm_guest"] as string | undefined;
-    if (!guestId) {
-      const { nanoid } = await import("nanoid");
-      guestId = nanoid();
-      (reply as any).setCookie?.("hm_guest", guestId, { path: "/", httpOnly: true, sameSite: "lax", maxAge: 60 * 60 * 24 * 365 });
-    }
-
-  // Pseudo = email obligatoire (lié à l'utilisateur connecté)
-  const userEmail = (req as any).user?.email as string;
-  const trimmed = String(userEmail || "").trim();
-    // Refuser doublon de pseudo dans la même partie (insensible à la casse)
-    const existingByNickname = await prisma.player.findFirst({ where: { gameId: id, nickname: { equals: trimmed, mode: 'insensitive' } }, select: { id: true, guestId: true } });
-    const existingByGuest = await prisma.player.findUnique({ where: { gameId_guestId: { gameId: id, guestId } }, select: { id: true } });
+    // Pseudo = email obligatoire (lié à l'utilisateur connecté)
+    const userEmail = (req as any).user?.email as string;
+    const trimmed = String(userEmail || "").trim();
+    
+    // IMPORTANT: Sur iOS/Safari, les cookies tiers ne fonctionnent pas
+    // On cherche TOUJOURS d'abord par nickname (email) pour voir si le joueur existe
+    const existingByNickname = await prisma.player.findFirst({ 
+      where: { gameId: id, nickname: { equals: trimmed, mode: 'insensitive' } }, 
+      select: { id: true, guestId: true } 
+    });
+    
     let playerId: string;
+    let guestId: string;
+    
     if (existingByNickname) {
-      // L'utilisateur est authentifié et son pseudo = email. Réutiliser le joueur existant
-      // en alignant le cookie invité sur celui déjà associé au joueur.
+      // Joueur existant trouvé par email
       playerId = existingByNickname.id;
-      if (existingByNickname.guestId && existingByNickname.guestId !== guestId) {
-  (reply as any).setCookie?.("hm_guest", existingByNickname.guestId, { path: "/", httpOnly: true, sameSite: "none", secure: true, maxAge: 60 * 60 * 24 * 365 });
+      guestId = existingByNickname.guestId;
+      
+      // Mettre à jour le cookie (tentatif, peut échouer sur iOS)
+      if (guestId) {
+        (reply as any).setCookie?.("hm_guest", guestId, { 
+          path: "/", 
+          httpOnly: true, 
+          sameSite: "none", 
+          secure: true, 
+          maxAge: 60 * 60 * 24 * 365 
+        });
       }
     } else {
+      // Nouveau joueur : essayer de lire le cookie, sinon en créer un
+      guestId = (req as any).cookies?.["hm_guest"] as string | undefined;
+      
+      if (!guestId) {
+        const { nanoid } = await import("nanoid");
+        guestId = nanoid();
+        (reply as any).setCookie?.("hm_guest", guestId, { 
+          path: "/", 
+          httpOnly: true, 
+          sameSite: "none", 
+          secure: true, 
+          maxAge: 60 * 60 * 24 * 365 
+        });
+      }
+      
+      // Créer le nouveau joueur
       const created = await prisma.player.upsert({
         where: { gameId_guestId: { gameId: id, guestId } },
         update: { nickname: trimmed },
@@ -106,6 +130,7 @@ export async function registerGameRoutes(app: FastifyInstance) {
       });
       playerId = created.id;
     }
+    
     (app as any).io?.emit("lobby-update", { type: "joined", gameId: id });
     return reply.send({ playerId, gameId: id, code: game.code });
   });
