@@ -279,3 +279,40 @@ export function requireUser(app: FastifyInstance) {
     }
   };
 }
+
+// Middleware pour accepter soit un utilisateur authentifié, soit un invité avec cookie
+// Utile pour les routes qui doivent fonctionner avec ou sans authentification complète
+export function requireUserOrGuest(app: FastifyInstance) {
+  return async function (req: any, reply: any) {
+    try {
+      // Essayer d'abord l'authentification JWT (utilisateur admin)
+      const authHeader = (req.headers?.["authorization"] as string) || "";
+      const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+      const tokenCookie = req.cookies?.["hm_auth"];
+      const raw = bearer || tokenCookie;
+      
+      if (raw) {
+        // Si on a un token JWT, l'utiliser
+        try {
+          const payload = (app as any).jwt.verify(raw) as { sub: string; email: string; isAdmin: boolean };
+          (req as any).user = payload;
+          return; // Authentification réussie via JWT
+        } catch (e) {
+          // Token invalide, continuer avec le cookie guest
+        }
+      }
+      
+      // Sinon, accepter le cookie guest
+      const guestId = req.cookies?.["hm_guest"];
+      if (guestId) {
+        (req as any).user = { guestId };
+        return; // Authentification réussie via cookie guest
+      }
+      
+      // Aucune authentification disponible
+      return reply.status(401).send({ error: "Unauthenticated" });
+    } catch (e) {
+      return reply.status(401).send({ error: "Unauthenticated" });
+    }
+  };
+}

@@ -1,7 +1,7 @@
 import { FastifyInstance } from "fastify";
 import { prisma } from "../prisma";
 import { z } from "zod";
-import { requireUser, requireAdmin } from "./auth";
+import { requireUserOrGuest, requireAdmin } from "./auth";
 import { generateAndSaveQuestions } from "../services/aiQuestions";
 import {
   updatePlayerTokens,
@@ -110,7 +110,7 @@ async function markQuestionAsSeen(playerId: string, questionId: string): Promise
 export async function registerQuizRoutes(app: FastifyInstance) {
   
   // GET /api/games/:gameId/quiz/status - Vérifier si le joueur peut jouer
-  app.get("/api/games/:gameId/quiz/status", { preHandler: requireUser(app) }, async (req, reply) => {
+  app.get("/api/games/:gameId/quiz/status", { preHandler: requireUserOrGuest(app) }, async (req, reply) => {
     const paramsSchema = z.object({ gameId: z.string() });
     const { gameId } = paramsSchema.parse((req as any).params);
     const user = (req as any).user;
@@ -176,7 +176,7 @@ export async function registerQuizRoutes(app: FastifyInstance) {
   });
 
   // POST /api/games/:gameId/quiz/start - Démarrer une nouvelle session
-  app.post("/api/games/:gameId/quiz/start", { preHandler: requireUser(app) }, async (req, reply) => {
+  app.post("/api/games/:gameId/quiz/start", { preHandler: requireUserOrGuest(app) }, async (req, reply) => {
     const paramsSchema = z.object({ gameId: z.string() });
     const { gameId } = paramsSchema.parse((req as any).params);
     const user = (req as any).user;
@@ -263,7 +263,7 @@ export async function registerQuizRoutes(app: FastifyInstance) {
   });
 
   // POST /api/games/:gameId/quiz/answer - Répondre à la question actuelle
-  app.post("/api/games/:gameId/quiz/answer", { preHandler: requireUser(app) }, async (req, reply) => {
+  app.post("/api/games/:gameId/quiz/answer", { preHandler: requireUserOrGuest(app) }, async (req, reply) => {
     const paramsSchema = z.object({ gameId: z.string() });
     const bodySchema = z.object({ 
       sessionId: z.string(),
@@ -456,7 +456,7 @@ export async function registerQuizRoutes(app: FastifyInstance) {
   });
 
   // POST /api/games/:gameId/quiz/cash-out - Encaisser les gains actuels
-  app.post("/api/games/:gameId/quiz/cash-out", { preHandler: requireUser(app) }, async (req, reply) => {
+  app.post("/api/games/:gameId/quiz/cash-out", { preHandler: requireUserOrGuest(app) }, async (req, reply) => {
     const paramsSchema = z.object({ gameId: z.string() });
     const bodySchema = z.object({ sessionId: z.string() });
     const { gameId } = paramsSchema.parse((req as any).params);
