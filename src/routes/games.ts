@@ -261,6 +261,25 @@ export async function registerGameRoutes(app: FastifyInstance) {
     if (!player) return reply.status(404).send({ error: "Player not found" });
     return reply.send({ player });
   });
+
+  // Endpoint de diagnostic admin: compter les lignes dans chaque table pour une partie
+  app.get("/api/games/:id/diagnostic", { preHandler: requireAdmin(app) }, async (req, reply) => {
+    const paramsSchema = z.object({ id: z.string() });
+    const { id } = paramsSchema.parse((req as any).params);
+    
+    const counts = {
+      listings: await prisma.listing.count({ where: { gameId: id } }),
+      dividendLogs: await prisma.dividendLog.count({ where: { gameId: id } }),
+      repairEvents: await prisma.repairEvent.count({ where: { holding: { gameId: id } } }),
+      refinanceLogs: await prisma.refinanceLog.count({ where: { holding: { gameId: id } } }),
+      propertyHoldings: await prisma.propertyHolding.count({ where: { gameId: id } }),
+      marketHoldings: await prisma.marketHolding.count({ where: { gameId: id } }),
+      marketTicks: await prisma.marketTick.count({ where: { gameId: id } }),
+      players: await prisma.player.count({ where: { gameId: id } }),
+    };
+    
+    return reply.send({ gameId: id, counts });
+  });
 }
 
 function generateCode() {
