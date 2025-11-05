@@ -37,6 +37,7 @@ model Player {
   markets    MarketHolding[]
   dividendLogs DividendLog[]
   quizSessions QuizSession[]
+  quizQuestionsSeen QuizQuestionSeen[]
 
   @@unique([gameId, guestId])
   @@unique([gameId, nickname])
@@ -207,6 +208,20 @@ model QuizQuestion {
   createdAt   DateTime @default(now())
   
   attempts    QuizAttempt[]
+  seenByPlayers QuizQuestionSeen[]
+}
+
+// Table de suivi des questions déjà vues par chaque joueur
+model QuizQuestionSeen {
+  id          String   @id @default(cuid())
+  player      Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  playerId    String
+  question    QuizQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  questionId  String
+  seenAt      DateTime @default(now())
+  
+  @@unique([playerId, questionId]) // Un joueur ne peut voir qu'une fois chaque question
+  @@index([playerId])
 }
 
 model QuizSession {

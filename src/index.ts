@@ -23,6 +23,7 @@ import { computeWeeklyMortgage } from "./services/simulation";
 import { registerEconomyRoutes } from "./routes/economy";
 import { cleanupMarketTicks } from "./services/tickCleanup";
 import { registerQuizRoutes } from "./routes/quiz";
+import { generateAndSaveQuestions } from "./services/aiQuestions";
 
 async function bootstrap() {
   // Exécuter les migrations Prisma au démarrage (idempotent). Utile sur Render sans shell.
@@ -289,6 +290,20 @@ async function bootstrap() {
       } catch (err) {
         app.log.error({ gameId: g.id, err }, "Erreur nettoyage automatique ticks");
       }
+    }
+  }, { timezone: env.TIMEZONE });
+
+  // Génération automatique de questions par IA toutes les heures
+  // Génère 10 nouvelles questions variées et supprime les anciennes si > 50 par niveau
+  cron.schedule("0 * * * *", async () => {
+    app.log.info("[cron] AI question generation (every hour)");
+    try {
+      const created = await generateAndSaveQuestions();
+      if (created > 0) {
+        app.log.info({ created }, "Questions IA générées automatiquement");
+      }
+    } catch (err) {
+      app.log.error({ err }, "Erreur génération questions IA");
     }
   }, { timezone: env.TIMEZONE });
 

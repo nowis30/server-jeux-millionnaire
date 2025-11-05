@@ -1,7 +1,8 @@
 import { FastifyInstance } from "fastify";
 import { prisma } from "../prisma";
 import { z } from "zod";
-import { requireUser } from "./auth";
+import { requireUser, requireAdmin } from "./auth";
+import { generateAndSaveQuestions } from "../services/aiQuestions";
 
 // Structure des gains par question (Quitte ou Double)
 const PRIZE_LADDER = [
@@ -28,6 +29,77 @@ const PRIZE_LADDER = [
 ];
 
 const COOLDOWN_MINUTES = 60;
+
+// Fonction pour sélectionner une question aléatoire non vue par le joueur
+async function selectUnseenQuestion(playerId: string, difficulty: string): Promise<any> {
+  // Récupérer les IDs des questions déjà vues
+  const seenQuestions = await prisma.quizQuestionSeen.findMany({
+    where: { playerId },
+    select: { questionId: true },
+  });
+  
+  const seenIds = seenQuestions.map(sq => sq.questionId);
+  
+  // Chercher d'abord parmi les questions non vues
+  const unseenCount = await prisma.quizQuestion.count({
+    where: {
+      difficulty,
+      id: { notIn: seenIds },
+    },
+  });
+  
+  if (unseenCount > 0) {
+    // Il y a des questions non vues, en prendre une au hasard
+    const skip = Math.floor(Math.random() * unseenCount);
+    return await prisma.quizQuestion.findFirst({
+      where: {
+        difficulty,
+        id: { notIn: seenIds },
+      },
+      skip,
+    });
+  }
+  
+  // Toutes les questions de cette difficulté ont été vues
+  // Réinitialiser le tracking et prendre n'importe quelle question
+  await prisma.quizQuestionSeen.deleteMany({
+    where: {
+      playerId,
+      question: { difficulty },
+    },
+  });
+  
+  // Prendre une question au hasard
+  const totalCount = await prisma.quizQuestion.count({
+    where: { difficulty },
+  });
+  
+  if (totalCount === 0) {
+    return null;
+  }
+  
+  const skip = Math.floor(Math.random() * totalCount);
+  return await prisma.quizQuestion.findFirst({
+    where: { difficulty },
+    skip,
+  });
+}
+
+// Fonction pour marquer une question comme vue
+async function markQuestionAsSeen(playerId: string, questionId: string): Promise<void> {
+  await prisma.quizQuestionSeen.upsert({
+    where: {
+      playerId_questionId: { playerId, questionId },
+    },
+    create: {
+      playerId,
+      questionId,
+    },
+    update: {
+      seenAt: new Date(),
+    },
+  });
+}
 
 export async function registerQuizRoutes(app: FastifyInstance) {
   
@@ -170,16 +242,15 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         },
       });
 
-      // Récupérer une question facile aléatoire
-      const question = await prisma.quizQuestion.findFirst({
-        where: { difficulty: 'easy' },
-        orderBy: { id: 'asc' },
-        skip: Math.floor(Math.random() * 10), // Random parmi les 10 faciles
-      });
+      // Récupérer une question facile non vue
+      const question = await selectUnseenQuestion(player.id, 'easy');
 
       if (!question) {
         return reply.status(500).send({ error: "Aucune question disponible" });
       }
+
+      // Marquer la question comme vue
+      await markQuestionAsSeen(player.id, question.id);
 
       return reply.send({
         sessionId: session.id,
@@ -306,17 +377,16 @@ export async function registerQuizRoutes(app: FastifyInstance) {
           },
         });
 
-        // Récupérer la prochaine question
+        // Récupérer la prochaine question (non vue)
         const nextPrizeInfo = PRIZE_LADDER[session.currentQuestion];
-        const nextQuestion = await prisma.quizQuestion.findFirst({
-          where: { difficulty: nextPrizeInfo.difficulty },
-          orderBy: { id: 'asc' },
-          skip: Math.floor(Math.random() * 10),
-        });
+        const nextQuestion = await selectUnseenQuestion(session.player.id, nextPrizeInfo.difficulty);
 
         if (!nextQuestion) {
           return reply.status(500).send({ error: "Erreur chargement question suivante" });
         }
+
+        // Marquer la nouvelle question comme vue
+        await markQuestionAsSeen(session.player.id, nextQuestion.id);
 
         return reply.send({
           correct: true,
@@ -440,6 +510,47 @@ export async function registerQuizRoutes(app: FastifyInstance) {
 
     } catch (err: any) {
       app.log.error({ err }, "Erreur cash-out quiz");
+      return reply.status(500).send({ error: err.message });
+    }
+  });
+
+  // POST /api/quiz/generate-ai - Générer des questions par IA (admin uniquement)
+  app.post("/api/quiz/generate-ai", { preHandler: requireAdmin(app) }, async (req, reply) => {
+    try {
+      app.log.info("Génération manuelle de questions par IA...");
+      const created = await generateAndSaveQuestions();
+      
+      return reply.send({
+        success: true,
+        created,
+        message: `${created} questions générées avec succès`,
+      });
+    } catch (err: any) {
+      app.log.error({ err }, "Erreur génération manuelle IA");
+      return reply.status(500).send({ error: err.message });
+    }
+  });
+
+  // GET /api/quiz/stats - Statistiques des questions (admin)
+  app.get("/api/quiz/stats", { preHandler: requireAdmin(app) }, async (req, reply) => {
+    try {
+      const [total, easy, medium, hard, finance, economy, realEstate] = await Promise.all([
+        prisma.quizQuestion.count(),
+        prisma.quizQuestion.count({ where: { difficulty: 'easy' } }),
+        prisma.quizQuestion.count({ where: { difficulty: 'medium' } }),
+        prisma.quizQuestion.count({ where: { difficulty: 'hard' } }),
+        prisma.quizQuestion.count({ where: { category: 'finance' } }),
+        prisma.quizQuestion.count({ where: { category: 'economy' } }),
+        prisma.quizQuestion.count({ where: { category: 'real-estate' } }),
+      ]);
+
+      return reply.send({
+        total,
+        byDifficulty: { easy, medium, hard },
+        byCategory: { finance, economy, realEstate },
+      });
+    } catch (err: any) {
+      app.log.error({ err }, "Erreur stats questions");
       return reply.status(500).send({ error: err.message });
     }
   });

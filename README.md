@@ -12,6 +12,18 @@ API backend pour le jeu de simulation économique multijoueur « Héritier Milli
 
 ## Fonctionnalités
 
+### Quiz "Quitte ou Double" avec IA
+
+- **35 questions de base** + **génération automatique IA** (10 questions/heure)
+- **Aucune répétition** : Système intelligent qui garantit que chaque joueur ne voit jamais deux fois la même question
+- **Paliers progressifs** : 5 faciles ($1k→$5k) → 5 moyennes ($10k→$50k) → difficiles ($75k→$5M+)
+- **Seuils de sécurité** : $5k, $50k, $500k, $5M (gains garantis)
+- **Cooldown** : 60 minutes entre chaque session
+- **IA OpenAI GPT-4o-mini** : Génération automatique pour questions toujours fraîches (~$5-9/mois)
+- **Catégories** : Finance, économie, immobilier
+- **Admin** : Endpoints pour génération manuelle et statistiques
+- 📚 [Documentation IA](./docs/AI_QUESTIONS.md) | 🚫 [Anti-répétition](./docs/QUIZ_NO_REPEAT.md)
+
 ### Optimisations de performance
 
 - **Nettoyage automatique des ticks** (toutes les 20 minutes):
@@ -53,6 +65,9 @@ CLIENT_ORIGINS=http://localhost:3000,https://client-jeux-millionnaire.vercel.app
 JWT_SECRET=<génére-un-secret-long-et-aléatoire>
 ADMIN_EMAIL=admin@example.com
 SEED_ON_BOOT=false
+
+# Optionnel: Génération IA de questions quiz
+OPENAI_API_KEY=sk-proj-...
 ```
 
 2. Installer les dépendances:
@@ -72,6 +87,9 @@ npx prisma migrate deploy
 
 ```bash
 node prisma/seed.js
+
+# Pour les questions quiz:
+node scripts/seed-quiz.js
 ```
 
 ### Démarrage
