@@ -345,12 +345,28 @@ export async function registerGameRoutes(app: FastifyInstance) {
   app.get("/api/games/:id/me", async (req, reply) => {
     const paramsSchema = z.object({ id: z.string() });
     const { id } = paramsSchema.parse((req as any).params);
-  const guestId = (req as any).cookies?.["hm_guest"] as string | undefined;
-  if (!guestId) return reply.status(404).send({ error: "Player not found" });
-    const player = await prisma.player.findUnique({
-      where: { gameId_guestId: { gameId: id, guestId } },
-      select: { id: true, nickname: true, cash: true, netWorth: true },
-    });
+    
+    // Support header X-Player-ID pour iOS/Safari
+    const playerIdHeader = req.headers['x-player-id'] as string | undefined;
+    let player;
+    
+    if (playerIdHeader) {
+      // Fallback iOS: chercher directement par playerId
+      player = await prisma.player.findFirst({
+        where: { id: playerIdHeader, gameId: id },
+        select: { id: true, nickname: true, cash: true, netWorth: true },
+      });
+    } else {
+      // Standard: utiliser cookie guest
+      const guestId = (req as any).cookies?.["hm_guest"] as string | undefined;
+      if (guestId) {
+        player = await prisma.player.findUnique({
+          where: { gameId_guestId: { gameId: id, guestId } },
+          select: { id: true, nickname: true, cash: true, netWorth: true },
+        });
+      }
+    }
+    
     if (!player) return reply.status(404).send({ error: "Player not found" });
     return reply.send({ player });
   });
