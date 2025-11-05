@@ -19,10 +19,6 @@ const getDifficultyForQuestion = (questionNumber: number): 'easy' | 'medium' | '
   return 'hard';
 };
 
-// Catégories supportées (cohérentes avec la génération IA et les stats)
-const CATEGORIES = ["finance", "economy", "real-estate"] as const;
-type Category = typeof CATEGORIES[number];
-
 function shuffle<T>(arr: T[]): T[] {
   const a = [...arr];
   for (let i = a.length - 1; i > 0; i--) {
@@ -81,12 +77,19 @@ async function selectUnseenQuestion(playerId: string, difficulty: string, sessio
     return null;
   }
 
-  // Ordre des catégories à essayer: celles pas encore vues dans la session d'abord (pour maximiser la diversité)
-  let categoriesOrder: string[] = [...CATEGORIES];
+  // Récupérer dynamiquement les catégories disponibles pour cette difficulté
+  const distinctCats = await prisma.quizQuestion.findMany({
+    where: { difficulty },
+    distinct: ["category"],
+    select: { category: true },
+  });
+  let categoriesAll = distinctCats.map((c) => c.category).filter(Boolean) as string[];
+  // Ordre des catégories: celles pas encore vues dans la session d'abord
+  let categoriesOrder: string[] = categoriesAll;
   if (sessionId) {
     const usedInSession = await getUsedCategoriesForSession(sessionId);
-    const notUsed = CATEGORIES.filter((c) => !usedInSession.has(c));
-    const alreadyUsed = CATEGORIES.filter((c) => usedInSession.has(c));
+    const notUsed = categoriesAll.filter((c) => !usedInSession.has(c));
+    const alreadyUsed = categoriesAll.filter((c) => usedInSession.has(c));
     categoriesOrder = [...shuffle(notUsed), ...shuffle(alreadyUsed)];
   } else {
     categoriesOrder = shuffle(categoriesOrder);
@@ -702,6 +705,16 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         realEstate: Math.max(0, realEstate - usedRealEstate),
       } as const;
 
+      // Catégories dynamiques: liste avec totaux/utilisées/restantes
+      const distinctCats = await prisma.quizQuestion.findMany({ distinct: ["category"], select: { category: true } });
+      const categories = [] as Array<{ category: string; total: number; used: number; remaining: number }>;
+      for (const c of distinctCats) {
+        const cat = c.category || 'uncategorized';
+        const t = await prisma.quizQuestion.count({ where: { category: cat } });
+        const u = await prisma.quizAttempt.findMany({ where: { question: { category: cat } }, distinct: ["questionId"], select: { questionId: true } }).then(r => r.length);
+        categories.push({ category: cat, total: t, used: u, remaining: Math.max(0, t - u) });
+      }
+
       return reply.send({
         total,
         byDifficulty: { easy, medium, hard },
@@ -709,6 +722,7 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         remaining,
         remainingByDifficulty,
         remainingByCategory,
+        categories,
       });
     } catch (err: any) {
       app.log.error({ err }, "Erreur stats questions");
@@ -755,6 +769,16 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         realEstate: Math.max(0, realEstate - usedRealEstate),
       } as const;
 
+      // Catégories dynamiques
+      const distinctCats = await prisma.quizQuestion.findMany({ distinct: ["category"], select: { category: true } });
+      const categories = [] as Array<{ category: string; total: number; used: number; remaining: number }>;
+      for (const c of distinctCats) {
+        const cat = c.category || 'uncategorized';
+        const t = await prisma.quizQuestion.count({ where: { category: cat } });
+        const u = await prisma.quizAttempt.findMany({ where: { question: { category: cat } }, distinct: ["questionId"], select: { questionId: true } }).then(r => r.length);
+        categories.push({ category: cat, total: t, used: u, remaining: Math.max(0, t - u) });
+      }
+
       return reply.send({
         questions: total,
         easy,
@@ -766,6 +790,7 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         remaining,
         remainingByDifficulty,
         remainingByCategory,
+        categories,
       });
     } catch (err: any) {
       app.log.error({ err }, "Erreur stats questions publiques");
