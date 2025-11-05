@@ -159,6 +159,69 @@ export async function registerGameRoutes(app: FastifyInstance) {
     return reply.send({ id: game.id, status: game.status });
   });
 
+  // Endpoint temporaire: restart sans transaction (contourne les problèmes de timeout)
+  app.post("/api/games/:id/restart-direct", { preHandler: requireAdmin(app) }, async (req, reply) => {
+    const paramsSchema = z.object({ id: z.string() });
+    const bodySchema = z.object({ confirm: z.boolean().optional() });
+    const { id } = paramsSchema.parse((req as any).params);
+    const { confirm } = bodySchema.parse((req as any).body ?? {});
+    if (!confirm) {
+      return reply.status(400).send({ error: "Confirmation requise. Ajoutez {confirm:true}" });
+    }
+    
+    try {
+      const steps: string[] = [];
+      
+      // Supprimer sans transaction (une requête à la fois)
+      app.log.info({ gameId: id }, "Suppression listings...");
+      const r1 = await prisma.listing.deleteMany({ where: { gameId: id } });
+      steps.push(`listings: ${r1.count}`);
+      
+      app.log.info({ gameId: id }, "Suppression dividendLogs...");
+      const r2 = await prisma.dividendLog.deleteMany({ where: { gameId: id } });
+      steps.push(`dividendLogs: ${r2.count}`);
+      
+      app.log.info({ gameId: id }, "Suppression repairEvents...");
+      const r3 = await prisma.repairEvent.deleteMany({ where: { holding: { gameId: id } } });
+      steps.push(`repairEvents: ${r3.count}`);
+      
+      app.log.info({ gameId: id }, "Suppression refinanceLogs...");
+      const r4 = await prisma.refinanceLog.deleteMany({ where: { holding: { gameId: id } } });
+      steps.push(`refinanceLogs: ${r4.count}`);
+      
+      app.log.info({ gameId: id }, "Suppression propertyHoldings...");
+      const r5 = await prisma.propertyHolding.deleteMany({ where: { gameId: id } });
+      steps.push(`propertyHoldings: ${r5.count}`);
+      
+      app.log.info({ gameId: id }, "Suppression marketHoldings...");
+      const r6 = await prisma.marketHolding.deleteMany({ where: { gameId: id } });
+      steps.push(`marketHoldings: ${r6.count}`);
+      
+      app.log.info({ gameId: id }, "Suppression marketTicks...");
+      const r7 = await prisma.marketTick.deleteMany({ where: { gameId: id } });
+      steps.push(`marketTicks: ${r7.count}`);
+      
+      app.log.info({ gameId: id }, "Suppression players...");
+      const r8 = await prisma.player.deleteMany({ where: { gameId: id } });
+      steps.push(`players: ${r8.count}`);
+      
+      app.log.info({ gameId: id }, "Mise à jour game status...");
+      await prisma.game.update({ where: { id }, data: { status: "running", startedAt: new Date() } });
+      steps.push(`game updated`);
+      
+      (app as any).io?.emit("lobby-update", { type: "restarted", gameId: id });
+      app.log.info({ gameId: id, steps }, "Restart direct réussi");
+      return reply.send({ id, status: "running", restartedAt: new Date().toISOString(), steps });
+    } catch (err: any) {
+      app.log.error({ err, gameId: id }, "Erreur restart direct");
+      return reply.status(500).send({ 
+        error: "Erreur lors du redémarrage", 
+        details: err.message,
+        code: err.code 
+      });
+    }
+  });
+
   // Redémarrer une partie (efface les données de la partie) — confirmation requise
   app.post("/api/games/:id/restart", { preHandler: requireAdmin(app) }, async (req, reply) => {
     const paramsSchema = z.object({ id: z.string() });
