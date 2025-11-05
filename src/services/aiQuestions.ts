@@ -78,6 +78,10 @@ const difficultyPrompts = {
   hard: "Questions avancées et complexes (calculs détaillés, stratégies optimales, concepts avancés). Niveau expert."
 };
 
+export const allowedCategories = [
+  'finance','economy','real-estate','business','technology','science','history','geography','sports','arts','cinema','music','literature','culture','nature','health','food','general','animals','translation'
+] as const;
+
 const categoryPrompts = {
   finance: "Marché boursier, actions, obligations, dividendes, rendements, investissements",
   economy: "Économie, taux d'intérêt, inflation, PIB, commerce international",
@@ -222,9 +226,6 @@ Réponds UNIQUEMENT avec le JSON, sans texte avant ou après.`;
     const questions = parsed.questions || [];
 
     // Validation basique: autoriser toutes les catégories supportées (pas uniquement finance/économie/immobilier)
-    const allowedCategories = [
-      'finance','economy','real-estate','business','technology','science','history','geography','sports','arts','cinema','music','literature','culture','nature','health','food','general','animals','translation'
-    ];
     const validQuestions = questions.filter((q: any) => 
       q.question && 
       q.optionA && q.optionB && q.optionC && q.optionD &&
@@ -354,6 +355,81 @@ export async function generateAndSaveQuestions(): Promise<number> {
     console.error("[AI] Erreur génération et sauvegarde:", error.message);
     return 0;
   }
+}
+
+/**
+ * Génère 20 questions par catégorie (réparties 7 easy, 7 medium, 6 hard)
+ */
+export async function generateTwentyPerCategory(): Promise<number> {
+  if (!process.env.OPENAI_API_KEY) {
+    console.warn("[AI] OPENAI_API_KEY non configurée, génération IA désactivée");
+    return 0;
+  }
+
+  const cats = [...allowedCategories];
+  let totalCreated = 0;
+
+  for (const cat of cats) {
+    const plan: Array<{ diff: 'easy'|'medium'|'hard'; count: number }> = [
+      { diff: 'easy', count: 7 },
+      { diff: 'medium', count: 7 },
+      { diff: 'hard', count: 6 },
+    ];
+
+    for (const step of plan) {
+      try {
+        const qs = await generateQuestionsWithAI(step.diff, cat as any, step.count);
+        for (const q of qs) {
+          try {
+            const duplicate = await isDuplicate(q.question);
+            if (duplicate) continue;
+            const shuffled = shuffleAnswers(q);
+            await prisma.quizQuestion.create({
+              data: {
+                question: shuffled.question,
+                optionA: shuffled.optionA,
+                optionB: shuffled.optionB,
+                optionC: shuffled.optionC,
+                optionD: shuffled.optionD,
+                correctAnswer: shuffled.correctAnswer,
+                difficulty: shuffled.difficulty,
+                category: shuffled.category,
+                imageUrl: shuffled.imageUrl || null,
+              }
+            });
+            totalCreated++;
+          } catch (e) {
+            // mute unitaire
+          }
+        }
+        // petite pause pour éviter rate limiting
+        await new Promise(r => setTimeout(r, 800));
+      } catch (e) {
+        // mute catégorie/diff
+      }
+    }
+  }
+
+  console.log(`[AI] Génération fixe: ${totalCreated} questions créées (20 par catégorie)`);
+  await rotateQuestions();
+  return totalCreated;
+}
+
+/**
+ * Vérifie le stock restant et regénère si ≤ threshold
+ */
+export async function replenishIfLow(threshold = 100): Promise<{ remaining: number; created: number }> {
+  // Calcule le "remaining" en excluant globalement les questions déjà posées
+  const total = await prisma.quizQuestion.count();
+  const used = await prisma.quizAttempt.findMany({ distinct: ["questionId"], select: { questionId: true } }).then(r => r.length);
+  const remaining = Math.max(0, total - used);
+
+  if (remaining <= threshold) {
+    console.log(`[AI] Stock faible (remaining=${remaining} ≤ ${threshold}) → génération 20 par catégorie...`);
+    const created = await generateTwentyPerCategory();
+    return { remaining, created };
+  }
+  return { remaining, created: 0 };
 }
 
 /**

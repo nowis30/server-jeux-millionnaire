@@ -23,7 +23,7 @@ import { computeWeeklyMortgage } from "./services/simulation";
 import { registerEconomyRoutes } from "./routes/economy";
 import { cleanupMarketTicks } from "./services/tickCleanup";
 import { registerQuizRoutes } from "./routes/quiz";
-import { generateAndSaveQuestions } from "./services/aiQuestions";
+import { generateAndSaveQuestions, replenishIfLow } from "./services/aiQuestions";
 
 async function bootstrap() {
   // Exécuter les migrations Prisma au démarrage (idempotent). Utile sur Render sans shell.
@@ -225,6 +225,16 @@ async function bootstrap() {
       );
 
       // Mode sans fin: pas de condition de fin, la partie continue indéfiniment.
+    }
+
+    // Réapprovisionnement auto des questions si le stock devient faible
+    try {
+      const { remaining, created } = await replenishIfLow(100);
+      if (created > 0) {
+        app.log.info({ remainingBefore: remaining, created }, "[cron] Quiz: stock faible → génération 20/questions par catégorie");
+      }
+    } catch (e: any) {
+      app.log.warn({ err: e?.message || e }, "[cron] replenishIfLow a échoué");
     }
   }, { timezone: env.TIMEZONE });
 
