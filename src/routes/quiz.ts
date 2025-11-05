@@ -116,10 +116,21 @@ export async function registerQuizRoutes(app: FastifyInstance) {
     const user = (req as any).user;
 
     try {
-      // Trouver le joueur
-      const player = await prisma.player.findFirst({
-        where: { gameId, guestId: user.guestId },
-      });
+      // Essayer de trouver le joueur via guestId (cookies) OU via header X-Player-ID (fallback pour iOS)
+      const playerIdHeader = req.headers['x-player-id'] as string | undefined;
+      
+      let player;
+      if (playerIdHeader) {
+        // iOS/Safari : utiliser le playerId du localStorage
+        player = await prisma.player.findFirst({
+          where: { id: playerIdHeader, gameId },
+        });
+      } else if (user.guestId) {
+        // Android/Chrome : utiliser le cookie
+        player = await prisma.player.findFirst({
+          where: { gameId, guestId: user.guestId },
+        });
+      }
 
       if (!player) {
         return reply.status(404).send({ error: "Joueur non trouvé" });
@@ -182,9 +193,19 @@ export async function registerQuizRoutes(app: FastifyInstance) {
     const user = (req as any).user;
 
     try {
-      const player = await prisma.player.findFirst({
-        where: { gameId, guestId: user.guestId },
-      });
+      // Support iOS : utiliser X-Player-ID header si disponible
+      const playerIdHeader = req.headers['x-player-id'] as string | undefined;
+      
+      let player;
+      if (playerIdHeader) {
+        player = await prisma.player.findFirst({
+          where: { id: playerIdHeader, gameId },
+        });
+      } else if (user.guestId) {
+        player = await prisma.player.findFirst({
+          where: { gameId, guestId: user.guestId },
+        });
+      }
 
       if (!player) {
         return reply.status(404).send({ error: "Joueur non trouvé" });
