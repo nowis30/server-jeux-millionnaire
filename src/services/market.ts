@@ -269,26 +269,10 @@ export async function dailyMarketTick(gameId: string) {
       step = Math.exp(Math.max(-0.2, Math.min(0.2, driftD + volD * randn(mulberry32(hashString(`${gameId}:${symbol}:${+last.at}`))))));
       steps[symbol] = step;
     } else {
-      // Dérivés corrélés
+      // Aucun dérivé dans l’univers actuel (5 drivers). Par sécurité, fallback corrélé au SP500.
       const log = (x: number) => Math.log(Math.max(1e-6, x));
-      const n = (s: string) => randn(mulberry32(hashString(`${gameId}:${s}:${+last.at}`)));
-      const noiseSmall = 0.02;
       const sp = steps["SP500"] ?? 1.0;
-      const nq = steps["QQQ"] ?? 1.0;
-      const tx = steps["TSX"] ?? 1.0;
-
-      switch (symbol) {
-        case "UPRO": step = Math.exp(3 * log(sp)); break;
-        case "TQQQ": step = Math.exp(3 * log(nq)); break;
-        case "VFV": step = sp; break;
-        case "VDY": step = tx; break;
-        case "IWM": step = Math.exp(1.2 * log(sp) + 0.025 * n(symbol)); break;
-        default: {
-          // fallback: utiliser le driver SP500 avec beta 1 et petit bruit
-          step = Math.exp(1.0 * log(sp) + 0.02 * n(symbol));
-        }
-      }
-      // clamp de sécurité
+      step = Math.exp(1.0 * log(sp));
       step = Math.max(Math.exp(-0.25), Math.min(Math.exp(0.25), step));
     }
 
@@ -298,8 +282,6 @@ export async function dailyMarketTick(gameId: string) {
     // Dividendes trimestriels (versement 4x/an, au dernier jour ouvré des mois 03/06/09/12)
     const dividendYieldA = symbol === "SP500" ? 0.018
       : symbol === "TSX" ? 0.03
-      : symbol === "VFV" ? 0.018
-      : symbol === "VDY" ? 0.04
       : 0;
     if (dividendYieldA > 0 && isQuarterEndBusinessDay(nextDate)) {
       const holdings = await prisma.marketHolding.findMany({ where: { gameId, symbol } });
