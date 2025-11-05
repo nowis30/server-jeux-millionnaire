@@ -132,24 +132,33 @@ async function bootstrap() {
   // Vérification CSRF pour méthodes non sûres
   app.addHook("preHandler", async (req, reply) => {
     const method = (req.method || "GET").toUpperCase();
-  if (["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
+    if (["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
       const url = (req as any).url as string;
-      // Exemptions: auth endpoints
-      if (url.startsWith("/api/auth/login") || url.startsWith("/api/auth/register") || url.startsWith("/api/auth/logout")) {
+      
+      // Exemptions: auth endpoints et quiz (qui utilisent X-Player-ID pour sécurité)
+      if (url.startsWith("/api/auth/login") || 
+          url.startsWith("/api/auth/register") || 
+          url.startsWith("/api/auth/logout") ||
+          url.includes("/quiz/")) {
         return;
       }
-  const csrfCookie = (req as any).cookies?.["hm_csrf"];
-  const tokenHeader = (req.headers?.["x-csrf-token"] as string) || (req.headers?.["x-xsrf-token"] as string);
-  // Si le token correspond au cookie -> OK
-  if (csrfCookie && tokenHeader && tokenHeader === csrfCookie) return;
+      
+      const csrfCookie = (req as any).cookies?.["hm_csrf"];
+      const tokenHeader = (req.headers?.["x-csrf-token"] as string) || (req.headers?.["x-xsrf-token"] as string);
+      
+      // Si le token correspond au cookie -> OK
+      if (csrfCookie && tokenHeader && tokenHeader === csrfCookie) return;
+      
       // Tolérance: si l'origine est autorisée et qu'une session utilisateur est présente (hm_auth),
       // on autorise sans CSRF pour compatibilité avec les navigateurs bloquant les cookies tiers.
       const origin = (req.headers?.["origin"] as string) || "";
       const allowed = !origin || env.CLIENT_ORIGINS.includes(origin) || /\.vercel\.app$/.test(origin) || origin.startsWith("http://localhost:");
       const hasAuth = Boolean((req as any).cookies?.["hm_auth"]);
+      
       // Tolérer si origine autorisée ET header CSRF présent (même si le cookie CSRF est bloqué par le navigateur)
       if (allowed && tokenHeader) return;
       if (allowed && hasAuth) return;
+      
       return reply.status(403).send({ error: "CSRF token invalid" });
     }
   });

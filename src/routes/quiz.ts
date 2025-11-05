@@ -38,24 +38,48 @@ const COOLDOWN_MINUTES = 60;
 
 // Fonction pour sélectionner une question aléatoire non vue par le joueur
 async function selectUnseenQuestion(playerId: string, difficulty: string): Promise<any> {
-  // Récupérer les IDs des questions déjà vues
+  // Compter d'abord le total de questions de cette difficulté
+  const totalCount = await prisma.quizQuestion.count({
+    where: { difficulty },
+  });
+  
+  if (totalCount === 0) {
+    return null; // Aucune question de cette difficulté
+  }
+  
+  // Récupérer les IDs des questions déjà vues pour cette difficulté
   const seenQuestions = await prisma.quizQuestionSeen.findMany({
-    where: { playerId },
+    where: { 
+      playerId,
+      question: { difficulty }
+    },
     select: { questionId: true },
   });
   
   const seenIds = seenQuestions.map(sq => sq.questionId);
+  const seenCount = seenIds.length;
   
-  // Chercher d'abord parmi les questions non vues
-  const unseenCount = await prisma.quizQuestion.count({
-    where: {
-      difficulty,
-      id: { notIn: seenIds },
-    },
-  });
+  // Si le joueur a vu toutes les questions, réinitialiser
+  if (seenCount >= totalCount) {
+    await prisma.quizQuestionSeen.deleteMany({
+      where: {
+        playerId,
+        question: { difficulty },
+      },
+    });
+    // Prendre une question au hasard après réinitialisation
+    const skip = Math.floor(Math.random() * totalCount);
+    return await prisma.quizQuestion.findFirst({
+      where: { difficulty },
+      skip,
+    });
+  }
+  
+  // Il reste des questions non vues
+  const unseenCount = totalCount - seenCount;
   
   if (unseenCount > 0) {
-    // Il y a des questions non vues, en prendre une au hasard
+    // Prendre une question non vue au hasard
     const skip = Math.floor(Math.random() * unseenCount);
     return await prisma.quizQuestion.findFirst({
       where: {
@@ -66,24 +90,7 @@ async function selectUnseenQuestion(playerId: string, difficulty: string): Promi
     });
   }
   
-  // Toutes les questions de cette difficulté ont été vues
-  // Réinitialiser le tracking et prendre n'importe quelle question
-  await prisma.quizQuestionSeen.deleteMany({
-    where: {
-      playerId,
-      question: { difficulty },
-    },
-  });
-  
-  // Prendre une question au hasard
-  const totalCount = await prisma.quizQuestion.count({
-    where: { difficulty },
-  });
-  
-  if (totalCount === 0) {
-    return null;
-  }
-  
+  // Fallback: prendre n'importe quelle question (ne devrait jamais arriver)
   const skip = Math.floor(Math.random() * totalCount);
   return await prisma.quizQuestion.findFirst({
     where: { difficulty },
