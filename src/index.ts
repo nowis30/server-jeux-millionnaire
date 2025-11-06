@@ -305,6 +305,26 @@ async function bootstrap() {
     }
   }, { timezone: env.TIMEZONE });
 
+  // Prix Amazon 20$ — 31/12/2025: tenter l'attribution à 23:00 le 31 décembre
+  cron.schedule("0 0 23 31 12 *", async () => {
+    try {
+      const { checkAndAwardAmazon2025 } = await import("./services/prizes");
+      if (new Date().getFullYear() === 2025) await checkAndAwardAmazon2025();
+    } catch (err) {
+      app.log.error({ err }, "[cron] prize amazon 2025");
+    }
+  }, { timezone: env.TIMEZONE });
+
+  // Filet de sécurité: si le serveur était down, réessayer le 1er janvier suivant à midi
+  cron.schedule("0 0 12 1 1 *", async () => {
+    try {
+      const { checkAndAwardAmazon2025 } = await import("./services/prizes");
+      await checkAndAwardAmazon2025();
+    } catch (err) {
+      app.log.error({ err }, "[cron] prize amazon 2025 (rattrapage)");
+    }
+  }, { timezone: env.TIMEZONE });
+
   // Chaque 1er janvier, choisir l'appréciation annuelle dans [2%,5%] pour l'année
   cron.schedule("0 5 0 1 1 *", async () => {
     app.log.info("[cron] yearly appreciation pick [2%,5%]");

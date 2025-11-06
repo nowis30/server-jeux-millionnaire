@@ -234,6 +234,21 @@ model QuizQuestionSeen {
   @@index([playerId])
 }
 
+model Prize {
+  id          String   @id @default(cuid())
+  type        String   // e.g. "amazon-gift-card"
+  amountValue Int      // Montant en dollars
+  currency    String   @default("CAD")
+  awardedAt   DateTime
+  winnerId    String?
+  winnerEmail String?  // Sauvegarde email si disponible
+  gameId      String?   // Contexte de partie si pertinent
+  notes       String?   // Détails (ex: netWorth du gagnant, classement)
+  player      Player?   @relation(fields: [winnerId], references: [id])
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @default(now()) @updatedAt
+}
+
 model QuizSession {
   id              String   @id @default(cuid())
   player          Player   @relation(fields: [playerId], references: [id])

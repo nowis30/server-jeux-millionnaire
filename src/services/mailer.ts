@@ -1,19 +1,14 @@
 import { env } from "../env";
-
-type MailOptions = {
-  to: string;
-  subject: string;
-  html: string;
-};
+// Mailer unifié: fallback console si SMTP non configuré.
+export type MailOptions = { to: string; subject: string; html: string; text?: string };
 
 export async function sendMail(opts: MailOptions) {
-  const { to, subject, html } = opts;
-  // Si pas de config SMTP, fallback console
+  const { to, subject, html, text } = opts;
   if (!env.SMTP_HOST || !env.MAIL_FROM) {
-    console.log(`[mailer:fallback] To=${to} Subject=${subject} Html=${html}`);
+    console.log(`[mailer:fallback] To=${to} Subject=${subject}`);
     return { ok: true, transport: "console" } as const;
   }
-  // Chargement dynamique de nodemailer pour éviter d’alourdir en dev sans SMTP
+  // Chargement dynamique (évite import si non utilisé)
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const nodemailer: any = require("nodemailer");
   const transporter = nodemailer.createTransport({
@@ -22,6 +17,6 @@ export async function sendMail(opts: MailOptions) {
     secure: env.SMTP_SECURE,
     auth: env.SMTP_USER && env.SMTP_PASS ? { user: env.SMTP_USER, pass: env.SMTP_PASS } : undefined,
   });
-  await transporter.sendMail({ from: env.MAIL_FROM, to, subject, html });
+  await transporter.sendMail({ from: env.MAIL_FROM, to, subject, html, text });
   return { ok: true, transport: "smtp" } as const;
 }
