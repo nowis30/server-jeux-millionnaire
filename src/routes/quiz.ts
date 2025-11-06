@@ -1069,9 +1069,13 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         return reply.status(404).send({ error: "Joueur non trouvé pour cette partie" });
       }
 
+      const MAX_TOKENS = 20;
+      const current = await prisma.player.findUnique({ where: { id: player.id }, select: { quizTokens: true } });
+      if (!current) return reply.status(404).send({ error: "Joueur introuvable" });
+      const next = Math.min(MAX_TOKENS, (current.quizTokens ?? 0) + amount);
       const updated = await prisma.player.update({
         where: { id: player.id },
-        data: { quizTokens: { increment: amount } },
+        data: { quizTokens: next },
         select: { id: true, quizTokens: true, nickname: true },
       });
 
@@ -1080,8 +1084,8 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         playerId: updated.id,
         nickname: updated.nickname,
         tokens: updated.quizTokens,
-        added: amount,
-        message: `${amount} token(s) ajouté(s)`,
+        added: Math.max(0, next - (current.quizTokens ?? 0)),
+        message: `${Math.max(0, next - (current.quizTokens ?? 0))} token(s) ajouté(s)`,
       });
     } catch (err: any) {
       app.log.error({ err }, "Erreur grant-tokens");

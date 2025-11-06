@@ -6,6 +6,7 @@ import { prisma } from "../prisma";
  */
 
 const TOKEN_EARN_INTERVAL_MS = 60 * 60 * 1000; // 1 heure en millisecondes
+const MAX_TOKENS = 20; // Nombre maximum de tokens accumulables
 
 /**
  * Vérifie et ajoute les tokens gagnés pour un joueur
@@ -28,26 +29,28 @@ export async function updatePlayerTokens(playerId: string): Promise<number> {
   const timeSinceLastToken = now.getTime() - player.lastTokenEarnedAt.getTime();
   const tokensToAdd = Math.floor(timeSinceLastToken / TOKEN_EARN_INTERVAL_MS);
 
-  if (tokensToAdd > 0) {
-    // Mettre à jour les tokens et le timestamp
-    const newLastTokenEarnedAt = new Date(
-      player.lastTokenEarnedAt.getTime() + tokensToAdd * TOKEN_EARN_INTERVAL_MS
-    );
-
-    const updated = await prisma.player.update({
-      where: { id: playerId },
-      data: {
-        quizTokens: player.quizTokens + tokensToAdd,
-        lastTokenEarnedAt: newLastTokenEarnedAt,
-      },
-      select: { quizTokens: true },
-    });
-
-    console.log(
-      `[tokens] Joueur ${playerId} a gagné ${tokensToAdd} token(s). Total: ${updated.quizTokens}`
-    );
-
-    return updated.quizTokens;
+  if (tokensToAdd > 0 && player.quizTokens < MAX_TOKENS) {
+    // Nombre de tokens réellement ajoutés en respectant le plafond
+    const canAdd = Math.min(tokensToAdd, Math.max(0, MAX_TOKENS - player.quizTokens));
+    if (canAdd > 0) {
+      const newLastTokenEarnedAt = new Date(
+        player.lastTokenEarnedAt.getTime() + canAdd * TOKEN_EARN_INTERVAL_MS
+      );
+      const updated = await prisma.player.update({
+        where: { id: playerId },
+        data: {
+          quizTokens: player.quizTokens + canAdd,
+          lastTokenEarnedAt: newLastTokenEarnedAt,
+        },
+        select: { quizTokens: true },
+      });
+  
+      console.log(
+        `[tokens] Joueur ${playerId} a gagné ${canAdd} token(s). Total: ${updated.quizTokens}`
+      );
+  
+      return updated.quizTokens;
+    }
   }
 
   return player.quizTokens;
@@ -86,12 +89,10 @@ export async function consumeQuizToken(playerId: string): Promise<boolean> {
  * Rembourse un token (par exemple si session échoue à démarrer)
  */
 export async function refundQuizToken(playerId: string): Promise<void> {
-  await prisma.player.update({
-    where: { id: playerId },
-    data: {
-      quizTokens: { increment: 1 },
-    },
-  });
+  const current = await prisma.player.findUnique({ where: { id: playerId }, select: { quizTokens: true } });
+  if (!current) throw new Error("Joueur non trouvé");
+  const next = Math.min(MAX_TOKENS, (current.quizTokens ?? 0) + 1);
+  await prisma.player.update({ where: { id: playerId }, data: { quizTokens: next } });
 
   console.log(`[tokens] Token remboursé pour joueur ${playerId}`);
 }
@@ -102,13 +103,16 @@ export async function refundQuizToken(playerId: string): Promise<void> {
 export async function getTimeUntilNextToken(playerId: string): Promise<number> {
   const player = await prisma.player.findUnique({
     where: { id: playerId },
-    select: { lastTokenEarnedAt: true },
+    select: { lastTokenEarnedAt: true, quizTokens: true },
   });
 
   if (!player) {
     throw new Error("Joueur non trouvé");
   }
 
+  if ((player.quizTokens ?? 0) >= MAX_TOKENS) {
+    return 0; // Au plafond, pas de compte à rebours utile
+  }
   const now = new Date();
   const timeSinceLastToken = now.getTime() - player.lastTokenEarnedAt.getTime();
   const timeUntilNext = TOKEN_EARN_INTERVAL_MS - (timeSinceLastToken % TOKEN_EARN_INTERVAL_MS);
@@ -144,21 +148,24 @@ export async function distributeTokensToActivePlayers(): Promise<void> {
       const timeSinceLastToken = now.getTime() - player.lastTokenEarnedAt.getTime();
       const tokensToAdd = Math.floor(timeSinceLastToken / TOKEN_EARN_INTERVAL_MS);
 
-      if (tokensToAdd > 0) {
-        const newLastTokenEarnedAt = new Date(
-          player.lastTokenEarnedAt.getTime() + tokensToAdd * TOKEN_EARN_INTERVAL_MS
-        );
+      if (tokensToAdd > 0 && player.quizTokens < MAX_TOKENS) {
+        const canAdd = Math.min(tokensToAdd, Math.max(0, MAX_TOKENS - player.quizTokens));
+        if (canAdd > 0) {
+          const newLastTokenEarnedAt = new Date(
+            player.lastTokenEarnedAt.getTime() + canAdd * TOKEN_EARN_INTERVAL_MS
+          );
 
-        await prisma.player.update({
-          where: { id: player.id },
-          data: {
-            quizTokens: player.quizTokens + tokensToAdd,
-            lastTokenEarnedAt: newLastTokenEarnedAt,
-          },
-        });
+          await prisma.player.update({
+            where: { id: player.id },
+            data: {
+              quizTokens: player.quizTokens + canAdd,
+              lastTokenEarnedAt: newLastTokenEarnedAt,
+            },
+          });
 
-        totalTokensDistributed += tokensToAdd;
-        playersUpdated++;
+          totalTokensDistributed += canAdd;
+          playersUpdated++;
+        }
       }
     }
   }
