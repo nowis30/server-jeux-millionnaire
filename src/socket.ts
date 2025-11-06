@@ -39,32 +39,59 @@ export function setupSocket(server: HTTPServer) {
   io.on("connection", (socket) => {
     // Suivi des rooms game:* pour ce socket
     (socket.data as any).joinedGames = new Set<string>();
+    (socket.data as any).nickname = undefined as undefined | string;
 
     function inc(gid: string) {
       const cur = onlineByGame.get(gid) || 0;
       onlineByGame.set(gid, cur + 1);
       io.to(`game:${gid}`).emit("online-count", { gameId: gid, online: cur + 1 });
+      const nick = (socket.data as any).nickname;
+      if (nick) {
+        let m = onlineUsersByGame.get(gid);
+        if (!m) { m = new Map<string, number>(); onlineUsersByGame.set(gid, m); }
+        m.set(nick, (m.get(nick) || 0) + 1);
+      }
     }
     function dec(gid: string) {
       const cur = onlineByGame.get(gid) || 0;
       const next = Math.max(0, cur - 1);
       onlineByGame.set(gid, next);
       io.to(`game:${gid}`).emit("online-count", { gameId: gid, online: next });
+      const nick = (socket.data as any).nickname;
+      if (nick) {
+        const m = onlineUsersByGame.get(gid);
+        if (m) {
+          const c = (m.get(nick) || 0) - 1;
+          if (c <= 0) m.delete(nick); else m.set(nick, c);
+        }
+      }
     }
 
-    const { gameId } = socket.handshake.query as { gameId?: string };
+    const { gameId, nickname } = socket.handshake.query as { gameId?: string; nickname?: string };
+    if (nickname && typeof nickname === 'string') {
+      (socket.data as any).nickname = nickname;
+    }
     if (gameId) {
       socket.join(`game:${gameId}`);
       (socket.data as any).joinedGames.add(gameId);
       inc(gameId);
     }
 
-    socket.on("join-game", (gid: string) => {
+    socket.on("join-game", (gid: string, nick?: string) => {
       if (!gid) return;
+      if (nick && typeof nick === 'string') {
+        (socket.data as any).nickname = nick;
+      }
       if (!(socket.data as any).joinedGames.has(gid)) {
         socket.join(`game:${gid}`);
         (socket.data as any).joinedGames.add(gid);
         inc(gid);
+      }
+    });
+
+    socket.on("presence", (payload: { nickname?: string }) => {
+      if (payload?.nickname && typeof payload.nickname === 'string') {
+        (socket.data as any).nickname = payload.nickname;
       }
     });
 
@@ -97,6 +124,12 @@ export function sendEventFeed(gameId: string, event: any) {
 
 // Compteurs en ligne par partie
 const onlineByGame = new Map<string, number>();
+const onlineUsersByGame = new Map<string, Map<string, number>>();
 export function getOnlineCount(gameId: string): number {
   return onlineByGame.get(gameId) || 0;
+}
+export function getOnlineUsers(gameId: string): string[] {
+  const m = onlineUsersByGame.get(gameId);
+  if (!m) return [];
+  return Array.from(m.keys()).sort((a, b) => a.localeCompare(b));
 }
