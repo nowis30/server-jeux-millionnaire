@@ -265,8 +265,12 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         return reply.status(500).send({ error: "Aucune autre question disponible" });
       }
 
-      // Décrémenter skipsLeft (colonne ajoutée; cast any pour compatibilité tant que prisma generate n'est pas rejouée)
-      await prisma.quizSession.update({ where: { id: session.id }, data: { /* @ts-ignore */ skipsLeft: (currentSkips - 1) as any } as any });
+      // Décrémenter skipsLeft (colonne ajoutée). Si la colonne n'existe pas encore (migration non appliquée), retourner une erreur explicite.
+      try {
+        await prisma.quizSession.update({ where: { id: session.id }, data: { /* @ts-ignore */ skipsLeft: (currentSkips - 1) as any } as any });
+      } catch (e: any) {
+        return reply.status(501).send({ error: "La fonction 'Passer la question' n'est pas encore disponible (mise à jour base de données requise)." });
+      }
 
       // Marquer cette nouvelle question comme vue
       await markQuestionAsSeen(session.playerId, nextQuestion.id);
