@@ -42,6 +42,7 @@ model Player {
   dividendLogs DividendLog[]
   quizSessions QuizSession[]
   quizQuestionsSeen QuizQuestionSeen[]
+  prizesWon Prize[] @relation("PrizeWinner")
 
   // Parrainage / Invitations
   sentInvites      ReferralInvite[] @relation("Inviter")
@@ -244,7 +245,7 @@ model Prize {
   winnerEmail String?  // Sauvegarde email si disponible
   gameId      String?   // Contexte de partie si pertinent
   notes       String?   // Détails (ex: netWorth du gagnant, classement)
-  player      Player?   @relation(fields: [winnerId], references: [id])
+  player      Player?   @relation("PrizeWinner", fields: [winnerId], references: [id])
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @default(now()) @updatedAt
 }
