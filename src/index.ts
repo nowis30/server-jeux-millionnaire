@@ -23,7 +23,7 @@ import { computeWeeklyMortgage } from "./services/simulation";
 import { registerEconomyRoutes } from "./routes/economy";
 import { cleanupMarketTicks } from "./services/tickCleanup";
 import { registerQuizRoutes } from "./routes/quiz";
-import { generateAndSaveQuestions, replenishIfLow } from "./services/aiQuestions";
+import { generateAndSaveQuestions, replenishIfLow, maintainQuestionStock } from "./services/aiQuestions";
 
 async function bootstrap() {
   // Exécuter les migrations Prisma au démarrage (idempotent). Utile sur Render sans shell.
@@ -227,14 +227,14 @@ async function bootstrap() {
       // Mode sans fin: pas de condition de fin, la partie continue indéfiniment.
     }
 
-    // Réapprovisionnement auto des questions si le stock devient faible (≤ 300)
+    // Maintien de stock: produire si <300, viser 400
     try {
-      const { remaining, created } = await replenishIfLow(300);
+      const { remaining, created, target } = await maintainQuestionStock(300, 400);
       if (created > 0) {
-        app.log.info({ remainingBefore: remaining, created }, "[cron] Quiz: stock faible (≤300) → génération 20/questions par catégorie");
+        app.log.info({ remainingBefore: remaining, created, target }, "[cron] Quiz: maintien de stock vers 400");
       }
     } catch (e: any) {
-      app.log.warn({ err: e?.message || e }, "[cron] replenishIfLow a échoué");
+      app.log.warn({ err: e?.message || e }, "[cron] maintainQuestionStock a échoué");
     }
   }, { timezone: env.TIMEZONE });
 
@@ -315,17 +315,16 @@ async function bootstrap() {
     }
   }, { timezone: env.TIMEZONE });
 
-  // Génération automatique de questions par IA toutes les heures
-  // Génère 10 nouvelles questions variées et supprime les anciennes si > 50 par niveau
+  // Génération IA: ne produire que si le stock est bas (<300), viser 400
   cron.schedule("0 * * * *", async () => {
-    app.log.info("[cron] AI question generation (every hour)");
+    app.log.info("[cron] AI maintain stock (every hour)");
     try {
-      const created = await generateAndSaveQuestions();
+      const { remaining, created, target } = await maintainQuestionStock(300, 400);
       if (created > 0) {
-        app.log.info({ created }, "Questions IA générées automatiquement");
+        app.log.info({ remainingBefore: remaining, created, target }, "[cron] AI: stock réapprovisionné");
       }
     } catch (err) {
-      app.log.error({ err }, "Erreur génération questions IA");
+      app.log.error({ err }, "Erreur maintien du stock IA");
     }
   }, { timezone: env.TIMEZONE });
 

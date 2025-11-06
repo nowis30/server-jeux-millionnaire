@@ -2,7 +2,7 @@ import { FastifyInstance } from "fastify";
 import { prisma } from "../prisma";
 import { z } from "zod";
 import { requireUserOrGuest, requireAdmin } from "./auth";
-import { generateAndSaveQuestions, replenishIfLow } from "../services/aiQuestions";
+import { generateAndSaveQuestions, maintainQuestionStock, replenishIfLow } from "../services/aiQuestions";
 import {
   updatePlayerTokens,
   consumeQuizToken,
@@ -960,10 +960,10 @@ export async function registerQuizRoutes(app: FastifyInstance) {
       ]);
       const remainingAfter = Math.max(0, totalAfter - usedAfter);
 
-      // Réappro si demandé et stock faible (≤ 300)
+      // Réappro si demandé: maintenir le stock (<300 → viser 400)
       let created = 0;
       if (replenish === 1) {
-        const res = await replenishIfLow(300);
+        const res = await maintainQuestionStock(300, 400);
         created = res.created;
       }
 

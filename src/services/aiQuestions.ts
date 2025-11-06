@@ -433,6 +433,78 @@ export async function replenishIfLow(threshold = 100): Promise<{ remaining: numb
 }
 
 /**
+ * Génère un petit batch pour une catégorie/difficulté donnée et insère en base avec déduplication.
+ */
+async function generateAndSaveBatch(diff: 'easy'|'medium'|'hard', cat: typeof allowedCategories[number], count: number): Promise<number> {
+  const qs = await generateQuestionsWithAI(diff, cat as any, count);
+  let created = 0;
+  for (const q of qs) {
+    try {
+      const duplicate = await isDuplicate(q.question);
+      if (duplicate) continue;
+      const shuffled = shuffleAnswers(q);
+      await prisma.quizQuestion.create({
+        data: {
+          question: shuffled.question,
+          optionA: shuffled.optionA,
+          optionB: shuffled.optionB,
+          optionC: shuffled.optionC,
+          optionD: shuffled.optionD,
+          correctAnswer: shuffled.correctAnswer,
+          difficulty: shuffled.difficulty,
+          category: shuffled.category,
+          imageUrl: shuffled.imageUrl || null,
+        }
+      });
+      created++;
+    } catch {}
+  }
+  return created;
+}
+
+/**
+ * Maintient le stock de questions entre un minimum et une cible.
+ * - Si remaining < min, génère par petits lots jusqu'à atteindre target (≈ 400)
+ */
+export async function maintainQuestionStock(min = 300, target = 400): Promise<{ remaining: number; created: number; target: number }> {
+  // Calcule le stock restant (total - utilisées globalement)
+  const total = await prisma.quizQuestion.count();
+  const used = await prisma.quizAttempt.findMany({ distinct: ["questionId"], select: { questionId: true } }).then(r => r.length);
+  const remaining = Math.max(0, total - used);
+
+  if (!process.env.OPENAI_API_KEY) {
+    console.warn("[AI] OPENAI_API_KEY manquante – maintien du stock désactivé");
+    return { remaining, created: 0, target };
+  }
+
+  if (remaining >= min) {
+    return { remaining, created: 0, target };
+  }
+
+  console.log(`[AI] Stock faible (remaining=${remaining} < ${min}) → génération par petits lots jusqu'à ${target}`);
+  let created = 0;
+  const diffs: Array<'easy'|'medium'|'hard'> = ['easy','medium','hard'];
+
+  // Boucle de petits batches (max ~50 itérations de sécurité)
+  for (let i = 0; i < 50 && (remaining + created) < target; i++) {
+    const needed = target - (remaining + created);
+    const chunk = Math.min(15, Math.max(3, Math.floor(needed / 4))); // 3 à 15 questions par appel
+    const cat = allowedCategories[Math.floor(Math.random() * allowedCategories.length)];
+    // pondération simple: plus d'easy/medium
+    const r = Math.random();
+    const diff = r < 0.45 ? 'easy' : r < 0.8 ? 'medium' : 'hard';
+
+    const c = await generateAndSaveBatch(diff, cat, chunk);
+    created += c;
+    // petite pause pour éviter le rate limiting
+    await new Promise(r => setTimeout(r, 500));
+  }
+
+  await rotateQuestions();
+  return { remaining, created, target };
+}
+
+/**
  * Rotation des questions : supprime les plus anciennes si trop nombreuses
  */
 async function rotateQuestions() {
