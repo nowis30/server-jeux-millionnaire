@@ -229,11 +229,11 @@ async function bootstrap() {
       // Mode sans fin: pas de condition de fin, la partie continue indéfiniment.
     }
 
-    // Maintien de stock: produire si <300, viser 400
+    // Maintien de stock: produire si <800, viser 1000
     try {
-      const { remaining, created, target } = await maintainQuestionStock(300, 400);
+      const { remaining, created, target } = await maintainQuestionStock(800, 1000);
       if (created > 0) {
-        app.log.info({ remainingBefore: remaining, created, target }, "[cron] Quiz: maintien de stock vers 400");
+        app.log.info({ remainingBefore: remaining, created, target }, "[cron] Quiz: maintien de stock vers 1000");
       }
     } catch (e: any) {
       app.log.warn({ err: e?.message || e }, "[cron] maintainQuestionStock a échoué");
@@ -332,13 +332,13 @@ async function bootstrap() {
     }
   }, { timezone: env.TIMEZONE });
 
-  // Génération IA: ne produire que si le stock est bas (<300), viser 400
+  // Génération IA: ne produire que si le stock est bas (<800), viser 1000
   cron.schedule("0 * * * *", async () => {
     app.log.info("[cron] AI maintain stock (every hour)");
     try {
-      const { remaining, created, target } = await maintainQuestionStock(300, 400);
+      const { remaining, created, target } = await maintainQuestionStock(800, 1000);
       if (created > 0) {
-        app.log.info({ remainingBefore: remaining, created, target }, "[cron] AI: stock réapprovisionné");
+        app.log.info({ remainingBefore: remaining, created, target }, "[cron] AI: stock réapprovisionné vers 1000");
       }
     } catch (err) {
       app.log.error({ err }, "Erreur maintien du stock IA");

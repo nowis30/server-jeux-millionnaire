@@ -242,7 +242,7 @@ export async function registerQuizRoutes(app: FastifyInstance) {
     const paramsSchema = z.object({ gameId: z.string() });
     const bodySchema = z.object({ sessionId: z.string(), questionId: z.string() });
     const { gameId } = paramsSchema.parse((req as any).params);
-    const { sessionId } = bodySchema.parse((req as any).body);
+  const { sessionId, questionId } = bodySchema.parse((req as any).body);
 
     try {
       const session = await prisma.quizSession.findUnique({ where: { id: sessionId }, include: { player: true } });
@@ -272,11 +272,36 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         return reply.status(501).send({ error: "La fonction 'Passer la question' n'est pas encore disponible (mise à jour base de données requise)." });
       }
 
-      // Marquer cette nouvelle question comme vue
+      // Récupérer la question actuelle pour exposer la bonne réponse et la retirer pour ce joueur
+      const currentQ = await prisma.quizQuestion.findUnique({ where: { id: questionId } });
+      if (!currentQ) {
+        return reply.status(404).send({ error: "Question courante introuvable" });
+      }
+
+      // Marquer la question SKIPPÉE comme vue pour ce joueur (elle ne reviendra pas pour lui)
+      await markQuestionAsSeen(session.playerId, currentQ.id);
+
+      // Enregistrer un 'attempt' spécial pour signaler une consommation globale (évite les doublons pour tous)
+      try {
+        await prisma.quizAttempt.create({
+          data: {
+            sessionId: session.id,
+            questionId: currentQ.id,
+            questionNumber: session.currentQuestion,
+            playerAnswer: 'SKIP' as any,
+            isCorrect: false,
+            prizeBefore: session.currentEarnings,
+            prizeAfter: session.currentEarnings,
+          },
+        });
+      } catch {}
+
+      // Marquer la NOUVELLE question comme vue
       await markQuestionAsSeen(session.playerId, nextQuestion.id);
 
       return reply.send({
         skipped: true,
+        correctAnswer: currentQ.correctAnswer,
         session: {
           id: session.id,
           currentQuestion: session.currentQuestion,
@@ -297,6 +322,63 @@ export async function registerQuizRoutes(app: FastifyInstance) {
 
     } catch (err: any) {
       app.log.error({ err }, "Erreur skip quiz");
+      return reply.status(500).send({ error: err.message });
+    }
+  });
+
+  // POST /api/games/:gameId/quiz/timeout - Temps écoulé: compter faux et terminer la session
+  app.post("/api/games/:gameId/quiz/timeout", { preHandler: requireUserOrGuest(app) }, async (req, reply) => {
+    const paramsSchema = z.object({ gameId: z.string() });
+    const bodySchema = z.object({ sessionId: z.string(), questionId: z.string() });
+    const { gameId } = paramsSchema.parse((req as any).params);
+    const { sessionId, questionId } = bodySchema.parse((req as any).body);
+
+    try {
+      const session = await prisma.quizSession.findUnique({ where: { id: sessionId }, include: { player: true } });
+      if (!session || session.status !== 'active') {
+        return reply.status(404).send({ error: "Session non trouvée ou terminée" });
+      }
+      if (session.gameId !== gameId) {
+        return reply.status(403).send({ error: "Cette session n'appartient pas à cette partie" });
+      }
+
+      const question = await prisma.quizQuestion.findUnique({ where: { id: questionId } });
+      if (!question) {
+        return reply.status(404).send({ error: "Question non trouvée" });
+      }
+
+      const prizeBefore = session.currentEarnings;
+      const prizeAfter = 0;
+
+      // Enregistrer la tentative comme TIMEOUT
+      try {
+        await prisma.quizAttempt.create({
+          data: {
+            sessionId: session.id,
+            questionId: question.id,
+            questionNumber: session.currentQuestion,
+            playerAnswer: 'TIMEOUT' as any,
+            isCorrect: false,
+            prizeBefore,
+            prizeAfter,
+          },
+        });
+      } catch {}
+
+      // Terminer la session en échec
+      await prisma.quizSession.update({
+        where: { id: session.id },
+        data: { status: 'failed', currentEarnings: prizeAfter, completedAt: new Date() },
+      });
+
+      return reply.send({
+        timeout: true,
+        correctAnswer: question.correctAnswer,
+        finalPrize: prizeAfter,
+        message: "Temps écoulé ! La session est terminée.",
+      });
+    } catch (err: any) {
+      app.log.error({ err }, "Erreur timeout quiz");
       return reply.status(500).send({ error: err.message });
     }
   });
