@@ -597,6 +597,7 @@ export async function registerQuizRoutes(app: FastifyInstance) {
           currentQuestion: session.currentQuestion + 1,
           currentEarnings: prizeAfter,
           securedAmount: newSecuredAmount,
+          skipsLeft: (session as any).skipsLeft ?? 0,
           nextPrize: getPrizeAmount(session.currentQuestion + 1),
           question: {
             id: nextQuestion.id,
