@@ -49,6 +49,7 @@ function illustrationForType(t: string): string {
   if (key.includes("triplex")) return "/images/props/triplex.svg";
   if (/(quadruplex|4-?plex|fourplex)/i.test(t)) return "/images/props/quadruplex.svg";
   if (/(6-?plex|sixplex|six-?plex)/i.test(t)) return "/images/props/6plex.svg";
+  if (/(condo|tour|tower|gratte-ciel)/i.test(t)) return "/images/props/condo-tower.svg";
   if (/(commercial|commerciale)/i.test(t)) return "/images/props/commercial.svg";
   // défaut: maison
   return "/images/props/maison.svg";
@@ -159,11 +160,74 @@ async function seedGenerated(minTotal = 50): Promise<number> {
   return templates.length;
 }
 
+// Génère une banque structurée demandée: 10 maisons, 10 duplex, 10 triplex, 10 6-plex, 5 tours (50 log.)
+async function seedBankFixedCounts(): Promise<number> {
+  type Spec = { label: string; units: number; count: number; rentMin: number; rentMax: number };
+  const specs: Spec[] = [
+    { label: "Maison", units: 1, count: 10, rentMin: 1200, rentMax: 2200 },
+    { label: "Duplex", units: 2, count: 10, rentMin: 950, rentMax: 1500 },
+    { label: "Triplex", units: 3, count: 10, rentMin: 900, rentMax: 1400 },
+    { label: "6-plex", units: 6, count: 10, rentMin: 800, rentMax: 1200 },
+    { label: "Tour à condos (50 log.)", units: 50, count: 5, rentMin: 1100, rentMax: 1800 },
+  ];
+
+  const cityCycle = QC_CITIES;
+  let created = 0;
+
+  function rand(min: number, max: number) { return Math.random() * (max - min) + min; }
+  function randi(min: number, max: number) { return Math.round(rand(min, max)); }
+
+  for (const spec of specs) {
+    for (let i = 0; i < spec.count; i++) {
+      const city = cityCycle[(i + created) % cityCycle.length];
+      const baseRent = randi(spec.rentMin, spec.rentMax);
+      const annualGross = baseRent * spec.units * 12;
+      const grm = Math.round(rand(10, 15) * 10) / 10; // 10.0 à 15.0
+      const price = Math.round(annualGross * grm);
+      const expensesAnnual = Math.round(annualGross * rand(0.25, 0.35));
+      const taxes = Math.round(expensesAnnual * 0.4);
+      const insurance = Math.round(expensesAnnual * 0.15);
+      const maintenance = Math.round(expensesAnnual * 0.45);
+      const plumbingState = ["bon", "moyen", "à rénover"][i % 3];
+      const electricityState = ["bon", "moyen", "à rénover"][ (i+1) % 3];
+      const roofState = ["bon", "moyen", "à rénover"][ (i+2) % 3];
+      const name = `${spec.label} #${String(i + 1).padStart(2, "0")} — GRM ${grm.toFixed(1)}×`;
+
+      const exists = await prisma.propertyTemplate.findFirst({ where: { name }, select: { id: true } });
+      if (exists) continue;
+
+      await prisma.propertyTemplate.create({
+        data: {
+          name,
+          city,
+          imageUrl: illustrationForType(spec.label),
+          description: `${spec.label} à ${city} · ${spec.units} logement(s). Loyer unitaire ≈ ${baseRent}$/mois.`,
+          price,
+          baseRent,
+          taxes,
+          insurance,
+          maintenance,
+          units: spec.units,
+          plumbingState,
+          electricityState,
+          roofState,
+        } as any,
+      });
+      created++;
+    }
+  }
+  if (created) console.log(`Seed banque structurée: +${created} gabarits ajoutés (maisons/duplex/triplex/6-plex/tours).`);
+  return created;
+}
+
 async function main() {
   // 1) Toujours tenter l'import JSON (idempotent)
   await seedFromJson();
 
-  // 2) Assurer un minimum de 50 templates au total avec génération si besoin
+  // 2) Créer la banque structurée demandée (idempotent)
+  await seedBankFixedCounts();
+
+  // 3) Assurer un minimum de 50 templates au total avec génération si besoin
   await seedGenerated(50);
 
   const total = await prisma.propertyTemplate.count();

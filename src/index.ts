@@ -238,6 +238,21 @@ async function bootstrap() {
     } catch (e: any) {
       app.log.warn({ err: e?.message || e }, "[cron] maintainQuestionStock a échoué");
     }
+
+    // Maintien de la banque d'immeubles: quotas par type (min 5) + minimum total 50
+    try {
+      const { ensurePropertyTypeQuotas, seedAll } = await import("./services/seeder");
+      const quotas = await ensurePropertyTypeQuotas(5);
+      app.log.info({ quotas }, "[cron] Quotas immo assurés (min 5 par type)");
+      const count = await prisma.propertyTemplate.count();
+      if (count < 50) {
+        app.log.info({ count }, "[cron] Banque immo < 50 → top-up global");
+        const res = await seedAll(50);
+        app.log.info({ result: res }, "[cron] Banque immo remontée à 50");
+      }
+    } catch (e) {
+      app.log.warn({ err: e }, "[cron] Vérification/reseed banque immo a échoué");
+    }
   }, { timezone: env.TIMEZONE });
 
   // Cron marché: cadencé par MARKET_TICK_CRON (par défaut: toutes les 12 minutes)

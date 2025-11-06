@@ -152,3 +152,70 @@ export async function seedAll(minTotal = 50) {
   const total = await prisma.propertyTemplate.count();
   return { fromJson, gen, total };
 }
+
+// Garantir un minimum par type (par nombre d'unités)
+// Types couverts: 1=Maison, 2=Duplex, 3=Triplex, 6=6-plex, 50=Tour à condos
+export async function ensurePropertyTypeQuotas(minPerType = 5) {
+  const specs: Array<{ label: string; units: number; rentMin: number; rentMax: number }> = [
+    { label: "Maison", units: 1, rentMin: 1200, rentMax: 2200 },
+    { label: "Duplex", units: 2, rentMin: 950, rentMax: 1500 },
+    { label: "Triplex", units: 3, rentMin: 900, rentMax: 1400 },
+    { label: "6-plex", units: 6, rentMin: 800, rentMax: 1200 },
+    { label: "Tour à condos (50 log.)", units: 50, rentMin: 1100, rentMax: 1800 },
+  ];
+
+  function rand(min: number, max: number) { return Math.random() * (max - min) + min; }
+  function randi(min: number, max: number) { return Math.round(rand(min, max)); }
+  const cities = [
+    "Montréal", "Québec", "Laval", "Gatineau", "Longueuil",
+    "Sherbrooke", "Saguenay", "Lévis", "Trois-Rivières", "Terrebonne",
+    "Repentigny", "Brossard", "Drummondville", "Granby", "Blainville",
+  ];
+
+  const results: Record<string, { before: number; created: number; after: number }> = {};
+
+  for (const spec of specs) {
+    const before = await prisma.propertyTemplate.count({ where: { units: spec.units } });
+    let deficit = Math.max(0, minPerType - before);
+    let created = 0;
+    for (let i = 0; i < deficit; i++) {
+      const city = cities[(i + created) % cities.length];
+      const baseRent = randi(spec.rentMin, spec.rentMax);
+      const annualGross = baseRent * spec.units * 12;
+      const grm = Math.round(rand(10, 15) * 10) / 10; // 10.0..15.0
+      const price = Math.round(annualGross * grm);
+      const expensesAnnual = Math.round(annualGross * rand(0.25, 0.35));
+      const taxes = Math.round(expensesAnnual * 0.4);
+      const insurance = Math.round(expensesAnnual * 0.15);
+      const maintenance = Math.round(expensesAnnual * 0.45);
+      const plumbingState = ["bon", "moyen", "à rénover"][i % 3];
+      const electricityState = ["bon", "moyen", "à rénover"][ (i+1) % 3];
+      const roofState = ["bon", "moyen", "à rénover"][ (i+2) % 3];
+      const name = `${spec.label} (auto) #${Date.now()}-${i}`;
+      const imageUrl = illustrationForType(spec.label);
+
+      await prisma.propertyTemplate.create({
+        data: {
+          name,
+          city,
+          imageUrl,
+          description: `${spec.label} à ${city} · ${spec.units} logement(s). Loyer unitaire ≈ ${baseRent}$/mois.`,
+          price,
+          baseRent,
+          taxes,
+          insurance,
+          maintenance,
+          units: spec.units,
+          plumbingState,
+          electricityState,
+          roofState,
+        } as any,
+      });
+      created++;
+    }
+    const after = await prisma.propertyTemplate.count({ where: { units: spec.units } });
+    results[`${spec.label}(${spec.units})`] = { before, created, after };
+  }
+
+  return results;
+}
