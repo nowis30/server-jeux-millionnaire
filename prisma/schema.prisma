@@ -239,6 +239,8 @@ model QuizSession {
   currentQuestion Int      @default(1) // Question actuelle (1-15+)
   currentEarnings Float    @default(0) // Gains accumulés
   securedAmount   Float    @default(0) // Montant sécurisé au dernier palier
+  // Nombre de sauts (skip) restants pour cette session
+  skipsLeft       Int      @default(3)
   startedAt       DateTime @default(now())
   completedAt     DateTime?
   

@@ -217,6 +217,7 @@ export async function registerQuizRoutes(app: FastifyInstance) {
             currentQuestion: activeSession.currentQuestion,
             currentEarnings: activeSession.currentEarnings,
             securedAmount: 0,
+            skipsLeft: (activeSession as any).skipsLeft ?? 0,
             nextPrize: currentPrizeAmount,
           },
         });
@@ -232,6 +233,66 @@ export async function registerQuizRoutes(app: FastifyInstance) {
 
     } catch (err: any) {
       app.log.error({ err }, "Erreur status quiz");
+      return reply.status(500).send({ error: err.message });
+    }
+  });
+
+  // POST /api/games/:gameId/quiz/skip - Passer la question actuelle (max 3 fois)
+  app.post("/api/games/:gameId/quiz/skip", { preHandler: requireUserOrGuest(app) }, async (req, reply) => {
+    const paramsSchema = z.object({ gameId: z.string() });
+    const bodySchema = z.object({ sessionId: z.string(), questionId: z.string() });
+    const { gameId } = paramsSchema.parse((req as any).params);
+    const { sessionId } = bodySchema.parse((req as any).body);
+
+    try {
+      const session = await prisma.quizSession.findUnique({ where: { id: sessionId }, include: { player: true } });
+      if (!session || session.status !== 'active') {
+        return reply.status(404).send({ error: "Session non trouvée ou terminée" });
+      }
+      if (session.gameId !== gameId) {
+        return reply.status(403).send({ error: "Cette session n'appartient pas à cette partie" });
+      }
+
+      const currentSkips = (session as any).skipsLeft ?? 0;
+      if (currentSkips <= 0) {
+        return reply.status(400).send({ error: "Plus de saut disponible" });
+      }
+
+      // Sélectionner une nouvelle question de même difficulté
+      const diff = getDifficultyForQuestion(session.currentQuestion);
+      const nextQuestion = await selectUnseenQuestion(session.playerId, diff, session.id);
+      if (!nextQuestion) {
+        return reply.status(500).send({ error: "Aucune autre question disponible" });
+      }
+
+      // Décrémenter skipsLeft (colonne ajoutée; cast any pour compatibilité tant que prisma generate n'est pas rejouée)
+      await prisma.quizSession.update({ where: { id: session.id }, data: { /* @ts-ignore */ skipsLeft: (currentSkips - 1) as any } as any });
+
+      // Marquer cette nouvelle question comme vue
+      await markQuestionAsSeen(session.playerId, nextQuestion.id);
+
+      return reply.send({
+        skipped: true,
+        session: {
+          id: session.id,
+          currentQuestion: session.currentQuestion,
+          currentEarnings: session.currentEarnings,
+          securedAmount: 0,
+          skipsLeft: Math.max(0, currentSkips - 1),
+          nextPrize: getPrizeAmount(session.currentQuestion),
+        },
+        question: {
+          id: nextQuestion.id,
+          text: nextQuestion.question,
+          optionA: nextQuestion.optionA,
+          optionB: nextQuestion.optionB,
+          optionC: nextQuestion.optionC,
+          optionD: nextQuestion.optionD,
+        },
+      });
+
+    } catch (err: any) {
+      app.log.error({ err }, "Erreur skip quiz");
       return reply.status(500).send({ error: err.message });
     }
   });
@@ -322,6 +383,7 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         currentQuestion: 1,
         currentEarnings: 0,
         securedAmount: 0,
+        skipsLeft: 3,
         nextPrize: getPrizeAmount(1),
         question: {
           id: question.id,
@@ -390,6 +452,7 @@ export async function registerQuizRoutes(app: FastifyInstance) {
           currentQuestion: activeSession.currentQuestion,
           currentEarnings: activeSession.currentEarnings,
           securedAmount: 0,
+          skipsLeft: (activeSession as any).skipsLeft ?? 0,
           nextPrize: getPrizeAmount(activeSession.currentQuestion),
         },
         question: {
