@@ -23,6 +23,7 @@ import { computeWeeklyMortgage } from "./services/simulation";
 import { registerEconomyRoutes } from "./routes/economy";
 import { cleanupMarketTicks } from "./services/tickCleanup";
 import { registerQuizRoutes } from "./routes/quiz";
+import { registerReferralRoutes } from "./routes/referrals";
 import { generateAndSaveQuestions, replenishIfLow, maintainQuestionStock } from "./services/aiQuestions";
 
 async function bootstrap() {
@@ -175,6 +176,7 @@ async function bootstrap() {
   await registerAuthRoutes(app);
   await registerEconomyRoutes(app);
   await registerQuizRoutes(app);
+  await registerReferralRoutes(app);
   try {
     await registerDocs(app);
   } catch (e) {

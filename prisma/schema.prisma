@@ -264,3 +264,21 @@ model QuizAttempt {
   
   @@index([sessionId])
 }
+
+// Invitations / Parrainage
+model ReferralInvite {
+  id             String   @id @default(cuid())
+  game           Game     @relation(fields: [gameId], references: [id])
+  gameId         String
+  inviter        Player   @relation("Inviter", fields: [inviterId], references: [id])
+  inviterId      String
+  code           String   @unique
+  status         String   @default("pending") // pending | accepted | expired
+  rewardAmount   Float    @default(1000000)
+  acceptedBy     Player?  @relation("Invitee", fields: [acceptedById], references: [id])
+  acceptedById   String?
+  createdAt      DateTime @default(now())
+  acceptedAt     DateTime?
+
+  @@index([gameId, status])
+}
