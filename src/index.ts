@@ -361,10 +361,12 @@ async function bootstrap() {
       const next = Math.max(0.02, Math.min(0.07, prev + step));
       await (prisma as any).game.update({ where: { id: g.id }, data: { baseMortgageRate: next } });
       // Appliquer le taux aux holdings (variable) et recalculer le paiement hebdo sur 25 ans basé sur la dette restante
-      const holdings = await prisma.propertyHolding.findMany({ where: { gameId: g.id }, select: { id: true, mortgageDebt: true } });
+      const holdings = await prisma.propertyHolding.findMany({ where: { gameId: g.id }, select: { id: true, mortgageDebt: true, termYears: true } as any }) as any[];
       for (const h of holdings) {
-        const weekly = computeWeeklyMortgage(h.mortgageDebt, next);
-        await prisma.propertyHolding.update({ where: { id: h.id }, data: { mortgageRate: next, weeklyPayment: weekly } });
+        const years = h?.termYears ? Math.min(25, Math.max(5, Number(h.termYears))) : 25;
+        const principal: number = Number(h.mortgageDebt ?? 0) || 0;
+        const weekly = computeWeeklyMortgage(principal, next, years);
+        await prisma.propertyHolding.update({ where: { id: String(h.id) }, data: { mortgageRate: next, weeklyPayment: weekly } });
       }
     }
   }, { timezone: env.TIMEZONE });

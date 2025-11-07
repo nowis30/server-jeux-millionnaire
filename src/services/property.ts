@@ -8,6 +8,7 @@ interface PurchasePropertyInput {
   templateId: string;
   mortgageRate?: number;
   downPaymentPercent?: number; // ex: 0.2 pour 20%
+  mortgageYears?: number; // 5..25 ans
 }
 
 const DEFAULT_MORTGAGE_RATE = 0.05;
@@ -19,6 +20,7 @@ export async function purchaseProperty({
   templateId,
   mortgageRate = DEFAULT_MORTGAGE_RATE,
   downPaymentPercent = DEFAULT_DOWN_PAYMENT,
+  mortgageYears,
 }: PurchasePropertyInput) {
   // Empêcher l'achat multiple du même template dans une même partie
   const alreadyOwned = await prisma.propertyHolding.findFirst({ where: { gameId, templateId } });
@@ -43,8 +45,9 @@ export async function purchaseProperty({
   const downPayment = Math.round(price * sanitizedPercent);
   if (player.cash < downPayment) throw new Error("Liquidités insuffisantes");
 
+  const term = Math.min(25, Math.max(5, Math.round(mortgageYears ?? 25)));
   const mortgagePrincipal = Math.max(0, price - downPayment);
-  const weeklyPayment = mortgagePrincipal > 0 ? computeWeeklyMortgage(mortgagePrincipal, mortgageRate) : 0;
+  const weeklyPayment = mortgagePrincipal > 0 ? computeWeeklyMortgage(mortgagePrincipal, mortgageRate, term) : 0;
 
   const holding = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     if (downPayment > 0) {
@@ -62,6 +65,10 @@ export async function purchaseProperty({
         mortgageRate,
         mortgageDebt: mortgagePrincipal,
         weeklyPayment,
+        // @ts-ignore: champ ajouté après migration prisma
+        termYears: term,
+        // @ts-ignore: champ ajouté après migration prisma
+        weeksElapsed: 0,
       },
     });
   });
@@ -70,7 +77,12 @@ export async function purchaseProperty({
   return holding;
 }
 
-export async function refinanceProperty(holdingId: string, newRate: number, cashOutPercent = 0.0) {
+export async function refinanceProperty(
+  holdingId: string,
+  newRate: number,
+  cashOutPercent = 0.0,
+  opts?: { keepRemainingTerm?: boolean; newTermYears?: number }
+) {
   const h = await prisma.propertyHolding.findUnique({ where: { id: holdingId } });
   if (!h) throw new Error("Holding not found");
 
@@ -78,9 +90,32 @@ export async function refinanceProperty(holdingId: string, newRate: number, cash
   const newDebtCap = h.currentValue * maxLtv;
   const targetDebt = Math.min(newDebtCap, h.mortgageDebt * (1 + cashOutPercent));
   const cashDelta = targetDebt - h.mortgageDebt;
-  const weeklyPayment = computeWeeklyMortgage(targetDebt, newRate);
+  // Déterminer la durée à utiliser pour recalculer le paiement
+  let termYears = Number((h as any).termYears ?? 25) || 25;
+  let weeksElapsed = Number((h as any).weeksElapsed ?? 0) || 0;
+  if (opts?.newTermYears != null) {
+    termYears = Math.min(25, Math.max(5, Math.round(opts.newTermYears)));
+    weeksElapsed = 0; // nouveau terme => compteur remis à zéro
+  }
+  const keepRem = opts?.keepRemainingTerm === true && opts?.newTermYears == null;
+  const remainingWeeks = keepRem ? Math.max(4, Math.round(termYears * 52 - weeksElapsed)) : Math.round(termYears * 52);
+  const weeklyRate = newRate / 52;
+  const weeklyPayment = remainingWeeks > 0
+    ? (weeklyRate === 0 ? targetDebt / remainingWeeks : (targetDebt * weeklyRate) / (1 - Math.pow(1 + weeklyRate, -remainingWeeks)))
+    : 0;
 
-  await prisma.propertyHolding.update({ where: { id: h.id }, data: { mortgageRate: newRate, mortgageDebt: targetDebt, weeklyPayment } });
+  await prisma.propertyHolding.update({
+    where: { id: h.id },
+    data: {
+      mortgageRate: newRate,
+      mortgageDebt: targetDebt,
+      weeklyPayment,
+      // @ts-ignore: nouveaux champs après migration
+      termYears,
+      // @ts-ignore
+      weeksElapsed,
+    } as any,
+  });
   await prisma.refinanceLog.create({ data: { holdingId: h.id, amount: cashDelta, rate: newRate } });
 
   // ajouter cash au joueur si cash-out

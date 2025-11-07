@@ -109,6 +109,8 @@ model PropertyHolding {
   mortgageRate  Float   @default(0.05)
   mortgageDebt  Float   @default(0)
   weeklyPayment Float   @default(0)
+  weeksElapsed  Int     @default(0)
+  termYears     Int     @default(25)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

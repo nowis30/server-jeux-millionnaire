@@ -45,8 +45,21 @@ export async function hourlyTick(gameId: string) {
     let delta = 0;
     for (const h of p.properties) {
       const rent = h.currentRent;
-      const expenses = (h.weeklyPayment ?? 0) + (h.template.taxes + h.template.insurance + h.template.maintenance) / ANNUAL_WEEKS;
+      const weeklyDebtPayment = h.weeklyPayment ?? 0;
+      const fixedWeekly = (h.template.taxes + h.template.insurance + h.template.maintenance) / ANNUAL_WEEKS;
+      const expenses = weeklyDebtPayment + fixedWeekly;
       delta += rent - expenses;
+      // Amortissement: réduire la dette de la portion capital du paiement hebdo
+      const weeklyRate = (h.mortgageRate ?? 0) / ANNUAL_WEEKS;
+      if (weeklyDebtPayment > 0 && h.mortgageDebt > 0 && weeklyRate >= 0) {
+        const interest = h.mortgageDebt * weeklyRate;
+        const principalPaid = Math.max(0, weeklyDebtPayment - interest);
+        if (principalPaid > 0) {
+          const newDebt = Math.max(0, h.mortgageDebt - principalPaid);
+          // Incrémente weeksElapsed
+          await prisma.propertyHolding.update({ where: { id: h.id }, data: { mortgageDebt: newDebt, /* @ts-ignore new after migration */ weeksElapsed: { increment: 1 } as any } as any });
+        }
+      }
     }
 
     // Rendements boursiers: variation de la valeur de portefeuille -> ajuster cash proportionnellement (simplifié)
@@ -259,8 +272,8 @@ function randn_bm() {
   return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
 }
 
-export function computeWeeklyMortgage(principal: number, rate: number) {
-  return weeklyMortgagePayment(principal, rate);
+export function computeWeeklyMortgage(principal: number, rate: number, years = 25) {
+  return weeklyMortgagePayment(principal, rate, years);
 }
 
 // Vérifie le seuil de victoire et termine la partie si atteint

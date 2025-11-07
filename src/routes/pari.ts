@@ -18,9 +18,17 @@ function evaluateDice([a,b,c]: [number,number,number]): Outcome {
   const isTriple = a===b && b===c;
   const isDouble = (a===b||a===c||b===c) && !isTriple;
   const isSuite = (sorted[0]+1===sorted[1] && sorted[1]+1===sorted[2]);
-  if (isTriple) return { type:'triple', multiplier:3, description:'Triple! x3' };
-  if (isSuite) return { type:'suite', multiplier:3, description:'Suite consécutive! x3' };
-  if (isDouble) return { type:'double', multiplier:2, description:'Double! x2' };
+  if (isTriple) {
+    // Triple: multiplicateur = somme des dés (ex: 1+1+1=3, 6+6+6=18)
+    const sum = a + b + c;
+    return { type:'triple', multiplier: sum, description: `Triple! x${sum}` };
+  }
+  if (isSuite) return { type:'suite', multiplier:2, description:'Suite consécutive! x2' };
+  if (isDouble) {
+    // Double: multiplicateur = valeur du dé doublé (ex: 4-4-1 => x4)
+    const val = a===b ? a : (a===c ? a : b);
+    return { type:'double', multiplier: val, description: `Double de ${val}! x${val}` };
+  }
   return { type:'aucun', multiplier:0, description:'Aucun combo gagnant' };
 }
 

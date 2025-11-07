@@ -118,13 +118,14 @@ export async function registerPropertyRoutes(app: FastifyInstance) {
       templateId: z.string(),
       mortgageRate: z.number().min(0).max(0.15).optional(),
       downPaymentPercent: z.number().min(0).max(1).optional(),
+      mortgageYears: z.number().min(5).max(25).optional(),
     });
 
     try {
   const params = paramsSchema.parse((req as any).params);
   await assertGameRunning(app, params.gameId);
       const body = bodySchema.parse((req as any).body);
-      const holding = await purchaseProperty({ gameId: params.gameId, ...body });
+  const holding = await purchaseProperty({ gameId: params.gameId, ...body });
       // Emit event feed
       (app as any).io?.to(`game:${params.gameId}`).emit("event-feed", {
         type: "property:purchase",
@@ -143,13 +144,18 @@ export async function registerPropertyRoutes(app: FastifyInstance) {
 
   app.post("/api/games/:gameId/properties/:holdingId/refinance", async (req, reply) => {
     const paramsSchema = z.object({ gameId: z.string(), holdingId: z.string() });
-    const bodySchema = z.object({ newRate: z.number().min(0).max(0.15), cashOutPercent: z.number().min(0).max(1).optional() });
+    const bodySchema = z.object({
+      newRate: z.number().min(0).max(0.15),
+      cashOutPercent: z.number().min(0).max(1).optional(),
+      keepRemainingTerm: z.boolean().optional(),
+      newTermYears: z.number().min(5).max(25).optional(),
+    });
 
     try {
   const { gameId, holdingId } = paramsSchema.parse((req as any).params);
   await assertGameRunning(app, gameId);
-      const { newRate, cashOutPercent } = bodySchema.parse((req as any).body);
-      await refinanceProperty(holdingId, newRate, cashOutPercent);
+  const { newRate, cashOutPercent, keepRemainingTerm, newTermYears } = bodySchema.parse((req as any).body);
+  await refinanceProperty(holdingId, newRate, cashOutPercent, { keepRemainingTerm, newTermYears });
       (app as any).io?.to(`game:${gameId}`).emit("event-feed", {
         type: "property:refinance",
         at: new Date().toISOString(),
