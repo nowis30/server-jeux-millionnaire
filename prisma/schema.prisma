@@ -90,6 +90,8 @@ model PropertyTemplate {
   plumbingState   String @default("bon") // bon | moyen | à rénover
   electricityState String @default("bon")
   roofState       String @default("bon")
+  floors          Int     @default(1)
+  hasCommercialCenter Boolean @default(false)
 
   holdings   PropertyHolding[]
   listings   Listing[]

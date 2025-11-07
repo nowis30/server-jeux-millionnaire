@@ -163,6 +163,7 @@ export async function ensurePropertyTypeQuotas(minPerType = 5) {
     { label: "Triplex", units: 3, rentMin: 900, rentMax: 1400 },
     { label: "6-plex", units: 6, rentMin: 800, rentMax: 1200 },
     { label: "Tour à condos (50 log.)", units: 50, rentMin: 1100, rentMax: 1800 },
+    { label: "Gratte-ciel (400 log.)", units: 400, rentMin: 850, rentMax: 1300 },
   ];
 
   function rand(min: number, max: number) { return Math.random() * (max - min) + min; }
@@ -182,8 +183,9 @@ export async function ensurePropertyTypeQuotas(minPerType = 5) {
     for (let i = 0; i < deficit; i++) {
       const city = cities[(i + created) % cities.length];
       const baseRent = randi(spec.rentMin, spec.rentMax);
-      const annualGross = baseRent * spec.units * 12;
-      const grm = Math.round(rand(10, 14) * 10) / 10; // 10.0..14.0
+  const annualGross = baseRent * spec.units * 12;
+  // Gratte-ciel: multiplier plus élevé 14-16x comme demandé
+  const grm = spec.units >= 400 ? Math.round(rand(14, 16) * 10) / 10 : Math.round(rand(10, 14) * 10) / 10;
       const price = Math.round(annualGross * grm);
       const expensesAnnual = Math.round(annualGross * rand(0.25, 0.35));
       const taxes = Math.round(expensesAnnual * 0.4);
@@ -199,8 +201,8 @@ export async function ensurePropertyTypeQuotas(minPerType = 5) {
         data: {
           name,
           city,
-          imageUrl,
-          description: `${spec.label} à ${city} · ${spec.units} logement(s). Loyer unitaire ≈ ${baseRent}$/mois.`,
+          imageUrl: spec.units >= 400 ? "/images/props/skyscraper.svg" : imageUrl,
+          description: `${spec.label} à ${city} · ${spec.units} logement(s). Loyer unitaire ≈ ${baseRent}$/mois.` + (spec.units >= 400 ? " Centre commercial inclus." : ""),
           price,
           baseRent,
           taxes,
@@ -210,6 +212,9 @@ export async function ensurePropertyTypeQuotas(minPerType = 5) {
           plumbingState,
           electricityState,
           roofState,
+          // Champs étages & centre commercial
+          floors: spec.units >= 400 ? 100 : 1,
+          hasCommercialCenter: spec.units >= 400 ? true : false,
         } as any,
       });
       created++;
