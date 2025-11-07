@@ -206,10 +206,9 @@ function shuffleAnswers(q: GeneratedQuestion): GeneratedQuestion {
 }
 
 // Image locale par défaut selon la difficulté
-function defaultImageForDifficulty(diff: 'easy'|'medium'|'hard'): string {
-  if (diff === 'easy') return '/images/quiz/easy-default.svg';
-  if (diff === 'medium') return '/images/quiz/medium-default.svg';
-  return '/images/quiz/hard-default.svg';
+// Images désactivées pour le moment
+function defaultImageForDifficulty(_diff: 'easy'|'medium'|'hard'): string {
+  return '';
 }
 
 /**
@@ -410,7 +409,7 @@ export async function generateAndSaveQuestions(): Promise<number> {
               correctAnswer: shuffled.correctAnswer,
               difficulty: shuffled.difficulty,
               category: batch.category === 'kids' ? 'kids' : shuffled.category,
-              imageUrl: defaultImageForDifficulty(shuffled.difficulty),
+              imageUrl: null,
             }
           });
           totalCreated++;
@@ -474,7 +473,7 @@ export async function generateTwentyPerCategory(): Promise<number> {
                 correctAnswer: shuffled.correctAnswer,
                 difficulty: shuffled.difficulty,
                 category: shuffled.category,
-                imageUrl: defaultImageForDifficulty(shuffled.difficulty),
+                imageUrl: null,
               }
             });
             totalCreated++;
@@ -533,7 +532,7 @@ async function generateAndSaveBatch(diff: 'easy'|'medium'|'hard', cat: typeof al
           correctAnswer: shuffled.correctAnswer,
           difficulty: shuffled.difficulty,
           category: shuffled.category,
-          imageUrl: defaultImageForDifficulty(shuffled.difficulty),
+          imageUrl: null,
         }
       });
       created++;
@@ -590,7 +589,7 @@ export async function maintainQuestionStock(min = 300, target = 400): Promise<{ 
             correctAnswer: shuffled.correctAnswer,
             difficulty: 'easy',
             category: 'kids',
-            imageUrl: defaultImageForDifficulty('easy'),
+            imageUrl: null,
           }
         });
         createdKids++;
