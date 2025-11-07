@@ -62,7 +62,7 @@ export async function updatePlayerTokens(playerId: string): Promise<number> {
 export async function consumeQuizToken(playerId: string): Promise<boolean> {
   const player = await prisma.player.findUnique({
     where: { id: playerId },
-    select: { quizTokens: true },
+    select: { quizTokens: true, lastTokenEarnedAt: true },
   });
 
   if (!player) {
@@ -73,10 +73,14 @@ export async function consumeQuizToken(playerId: string): Promise<boolean> {
     return false; // Pas assez de tokens
   }
 
+  // Si le joueur était au plafond, on "redémarre" l'horloge à maintenant
+  const wasAtCap = player.quizTokens >= MAX_TOKENS;
+
   await prisma.player.update({
     where: { id: playerId },
     data: {
       quizTokens: player.quizTokens - 1,
+      ...(wasAtCap ? { lastTokenEarnedAt: new Date() } : {}),
     },
   });
 

@@ -66,7 +66,7 @@ export async function registerGameRoutes(app: FastifyInstance) {
       hostPlayer = await prisma.player.upsert({
         where: { gameId_guestId: { gameId: game.id, guestId } },
         update: { nickname: trimmed },
-        create: { nickname: trimmed, cash: INITIAL_CASH, netWorth: INITIAL_CASH, gameId: game.id, guestId },
+        create: { nickname: trimmed, cash: INITIAL_CASH, netWorth: INITIAL_CASH, gameId: game.id, guestId, quizTokens: 15 },
         select: { id: true },
       });
     }
@@ -137,7 +137,7 @@ export async function registerGameRoutes(app: FastifyInstance) {
       const created = await prisma.player.upsert({
         where: { gameId_guestId: { gameId: id, guestId } },
         update: { nickname: trimmed },
-        create: { nickname: trimmed, cash: INITIAL_CASH, netWorth: INITIAL_CASH, gameId: id, guestId },
+        create: { nickname: trimmed, cash: INITIAL_CASH, netWorth: INITIAL_CASH, gameId: id, guestId, quizTokens: 15 },
         select: { id: true },
       });
       playerId = created.id;
@@ -179,7 +179,7 @@ export async function registerGameRoutes(app: FastifyInstance) {
       const created = await prisma.player.upsert({
         where: { gameId_guestId: { gameId: game.id, guestId } },
         update: { nickname: trimmed },
-        create: { nickname: trimmed, cash: INITIAL_CASH, netWorth: INITIAL_CASH, gameId: game.id, guestId },
+        create: { nickname: trimmed, cash: INITIAL_CASH, netWorth: INITIAL_CASH, gameId: game.id, guestId, quizTokens: 15 },
         select: { id: true },
       });
       playerId = created.id;

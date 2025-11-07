@@ -15,7 +15,7 @@ Le quiz utilise un **système de tokens** pour contrôler la fréquence de jeu. 
 
 ### 1. Gain automatique de tokens
 
-**Fréquence** : 1 token toutes les heures
+**Fréquence** : 1 token toutes les heures (jusqu'à un maximum de 20)
 
 **Mécanisme** :
 - Chaque joueur a un champ `lastTokenEarnedAt` (timestamp du dernier token gagné)
@@ -57,7 +57,7 @@ Le quiz utilise un **système de tokens** pour contrôler la fréquence de jeu. 
 
 ### 3. Accumulation
 
-**Illimité** : Pas de limite maximale de tokens
+**Plafond** : Maximum 20 tokens peuvent être accumulés
 
 **Stratégies possibles** :
 - **Joueur actif** : Joue toutes les heures → Toujours 0-1 token
@@ -68,7 +68,7 @@ Le quiz utilise un **système de tokens** pour contrôler la fréquence de jeu. 
 Lundi 10h : Créé → 1 token
 Lundi 15h : Pas joué → 6 tokens (1 initial + 5 gagnés)
 Lundi 15h30 : Joue 3 sessions → 3 tokens restants
-Mardi 10h : Pas joué → 22 tokens (3 + 19 gagnés pendant la nuit)
+Mardi 10h : Pas joué → 20 tokens (plafond atteint)
 ```
 
 ## API et Endpoints
@@ -150,8 +150,8 @@ model Player {
 ```
 
 **Valeurs par défaut** :
-- Nouveau joueur : `quizTokens = 1` (peut jouer immédiatement)
-- `lastTokenEarnedAt = now()` (commence le compteur de 1h)
+- Nouveau joueur : `quizTokens = 15` (peut jouer immédiatement plusieurs sessions)
+- `lastTokenEarnedAt = now()` (commence le compteur d'1h pour le prochain gain)
 
 ### Requêtes SQL utiles
 
@@ -300,6 +300,12 @@ Distribue les tokens à tous les joueurs actifs (cron).
 **Usage** : Appelé automatiquement par le cron job
 
 ---
+
+## Règles de plafond et regain après utilisation
+
+- Plafond strict: un joueur ne peut pas dépasser 20 tokens.
+- Lorsque le joueur était au plafond (20) et consomme 1 token, l'horloge est réinitialisée à maintenant: il faut attendre une heure complète pour revenir à 20.
+- Concrètement, si le joueur est à 20 et joue une session à 14h05, le prochain token ne sera regagné qu'à partir de 15h05.
 
 ## Comparaison avec l'ancien système (Cooldown)
 
