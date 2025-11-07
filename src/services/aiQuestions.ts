@@ -13,7 +13,7 @@ interface GeneratedQuestion {
   optionD: string;
   correctAnswer: 'A' | 'B' | 'C' | 'D';
   difficulty: 'easy' | 'medium' | 'hard';
-  category: 'finance' | 'economy' | 'real-estate' | 'business' | 'technology' | 'science' | 'history' | 'geography' | 'sports' | 'arts' | 'cinema' | 'music' | 'literature' | 'culture' | 'nature' | 'health' | 'food' | 'general' | 'animals' | 'translation' | 'kids' | 'enfants';
+  category: 'finance' | 'economy' | 'real-estate' | 'business' | 'technology' | 'science' | 'history' | 'geography' | 'sports' | 'arts' | 'cinema' | 'music' | 'literature' | 'culture' | 'nature' | 'health' | 'food' | 'general' | 'animals' | 'translation' | 'kids' | 'enfants' | 'quebec' | 'definitions';
   imageUrl?: string; // URL optionnelle d'une image illustrant la question
 }
 
@@ -155,7 +155,7 @@ const difficultyPrompts = {
 };
 
 export const allowedCategories = [
-  'finance','economy','real-estate','business','technology','science','history','geography','sports','arts','cinema','music','literature','culture','nature','health','food','general','animals','translation','kids','enfants'
+  'finance','economy','real-estate','business','technology','science','history','geography','sports','arts','cinema','music','literature','culture','nature','health','food','general','animals','translation','kids','enfants','quebec','definitions'
 ] as const;
 
 const categoryPrompts = {
@@ -180,7 +180,9 @@ const categoryPrompts = {
   animals: "Zoologie, animaux domestiques et sauvages, habitats, chaînes alimentaires, comportements",
   translation: "Traduction français-anglais, faux amis, synonymes, expressions idiomatiques, conjugaison simple",
   kids: "Questions pour enfants très simples: objets du quotidien, animaux familiers, couleurs, chiffres 1-10",
-  enfants: "Questions très faciles (6-9 ans): vocabulaire simple, monde concret, réponses évidentes"
+  enfants: "Questions très faciles (6-9 ans): vocabulaire simple, monde concret, réponses évidentes",
+  quebec: "Culture québécoise et canadienne-française: expressions, traditions, géographie locale (provinces/villes), sport (Canadiens de Montréal), histoire (Nouvelle-France), gastronomie (poutine, sirop d'érable)",
+  definitions: "Définitions de mots en français (niveau intermédiaire): synonymes, antonymes, sens le plus juste, choix du bon terme dans un contexte"
 };
 
 /**
@@ -356,6 +358,9 @@ export async function generateAndSaveQuestions(): Promise<number> {
       { difficulty: 'easy' as const, category: 'culture' as const, count: 2 },
       
       // Questions moyennes (35 questions) - Connaissances intermédiaires
+  // Ajout de thèmes ciblés pour Q5-Q7: définitions de mots et culture québécoise
+  { difficulty: 'medium' as const, category: 'definitions' as const, count: 4 },
+  { difficulty: 'medium' as const, category: 'quebec' as const, count: 4 },
       { difficulty: 'medium' as const, category: 'history' as const, count: 4 },
       { difficulty: 'medium' as const, category: 'science' as const, count: 4 },
       { difficulty: 'medium' as const, category: 'literature' as const, count: 3 },

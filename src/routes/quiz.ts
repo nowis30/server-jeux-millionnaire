@@ -183,6 +183,27 @@ async function selectKidFriendlyQuestion(playerId: string, sessionId?: string): 
   return scored[0]?.c || candidates[0];
 }
 
+// Sélection préférentielle pour Q5–Q7: catégories "definitions" et "quebec" (difficulté medium)
+async function selectMediumPreferred(playerId: string, sessionId?: string): Promise<any> {
+  const difficulty = 'medium';
+  const preferredCats = ['definitions', 'quebec'];
+
+  for (const category of preferredCats) {
+    const totalCat = await prisma.quizQuestion.count({ where: { difficulty, category } });
+    if (totalCat === 0) continue;
+    const seenCat = await prisma.quizQuestionSeen.findMany({ where: { playerId, question: { difficulty, category } }, select: { questionId: true } });
+    const seenIds = seenCat.map(s => s.questionId);
+    const remaining = totalCat - seenIds.length;
+    if (remaining <= 0) continue;
+    const skip = Math.floor(Math.random() * remaining);
+    const q = await prisma.quizQuestion.findFirst({ where: { difficulty, category, id: { notIn: seenIds } }, skip });
+    if (q) return q;
+  }
+
+  // Fallback vers sélection standard non vue (toutes catégories medium)
+  return await selectUnseenQuestion(playerId, difficulty, sessionId);
+}
+
 // Fonction pour marquer une question comme vue
 async function markQuestionAsSeen(playerId: string, questionId: string): Promise<void> {
   await prisma.quizQuestionSeen.upsert({
@@ -615,7 +636,9 @@ export async function registerQuizRoutes(app: FastifyInstance) {
     }
     const question = activeSession.currentQuestion <= 4
       ? await selectKidFriendlyQuestion(player.id, activeSession.id)
-      : await selectUnseenQuestion(player.id, difficulty, activeSession.id);
+      : (activeSession.currentQuestion <= 7
+          ? await selectMediumPreferred(player.id, activeSession.id)
+          : await selectUnseenQuestion(player.id, difficulty, activeSession.id));
       if (!question) {
         return reply.status(500).send({ error: "Aucune question disponible pour reprise" });
       }
@@ -764,7 +787,9 @@ export async function registerQuizRoutes(app: FastifyInstance) {
   }
   const nextQuestion = (session.currentQuestion + 1) <= 4
     ? await selectKidFriendlyQuestion(session.player.id, session.id)
-    : await selectUnseenQuestion(session.player.id, nextDifficulty, session.id);
+    : ((session.currentQuestion + 1) <= 7
+        ? await selectMediumPreferred(session.player.id, session.id)
+        : await selectUnseenQuestion(session.player.id, nextDifficulty, session.id));
 
         if (!nextQuestion) {
           return reply.status(500).send({ error: "Erreur chargement question suivante" });
