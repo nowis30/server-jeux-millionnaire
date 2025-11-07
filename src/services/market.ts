@@ -167,15 +167,23 @@ export async function ensureMarketHistory(gameId: string, years = 50) {
     const rng = mulberry32(hashString(`${gameId}:${symbol}`));
 
     // Régimes: bull/bear/flat avec durées aléatoires
+    // Objectif: assurer une dérive POSITIVE à long terme (bourse gagnante sur longue période)
+    // - Probabilité bull augmentée, bear réduit
+    // - Multiplicateurs de drift TOUJOURS positifs (même en bear, drift > 0, mais plus faible)
     const regimes: Array<{ driftD: number; volD: number; len: number }> = [];
     let remaining = totalDays;
     while (remaining > 0) {
       const mode = rng();
-      const isBull = mode < 0.55; // 55% bull
-      const isBear = !isBull && mode < 0.8; // 25% bear
+      const isBull = mode < 0.6; // 60% bull
+      const isBear = !isBull && mode < 0.75; // 15% bear
       const len = Math.max(20, Math.floor(rng() * 250)); // ~1-12 mois de bourse
-      const driftD = (driftA / daysPerYear) * (isBull ? 1.2 : isBear ? -0.6 : 0.2);
-      const volD = (volA / Math.sqrt(daysPerYear)) * (isBull ? 0.9 : isBear ? 1.4 : 0.7);
+      // Drift quotidien basé sur driftA, avec multiplicateurs positifs:
+      // - Bull: 1.4x du drift annuel (forte hausse)
+      // - Flat: 1.0x du drift annuel (croissance de fond)
+      // - Bear: 0.5x du drift annuel (ralenti, mais pas de drift négatif sur le long terme)
+      const mult = isBull ? 1.4 : isBear ? 0.5 : 1.0;
+      const driftD = (driftA / daysPerYear) * mult;
+      const volD = (volA / Math.sqrt(daysPerYear)) * (isBull ? 0.85 : isBear ? 1.35 : 0.9);
       regimes.push({ driftD, volD, len: Math.min(len, remaining) });
       remaining -= len;
     }
