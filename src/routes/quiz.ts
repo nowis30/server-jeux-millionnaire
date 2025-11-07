@@ -32,6 +32,23 @@ function shuffle<T>(arr: T[]): T[] {
 const COOLDOWN_MINUTES = 60;
 const MAX_QUESTIONS = 10;
 
+// Images enfant pour les 4 premières questions (thèmes simples, pédagogiques)
+const CHILD_FRIENDLY_IMAGES: Record<number, string> = {
+  1: "/images/quiz/easy1.svg",
+  2: "/images/quiz/easy2.svg",
+  3: "/images/quiz/easy3.svg",
+  4: "/images/quiz/easy4.svg",
+};
+
+function attachImage(questionNumber: number, q: any) {
+  if (!q) return q;
+  const img = CHILD_FRIENDLY_IMAGES[questionNumber];
+  if (img) {
+    return { ...q, imageUrl: img };
+  }
+  return q;
+}
+
 // Récupérer les catégories déjà utilisées dans la session courante
 async function getUsedCategoriesForSession(sessionId: string): Promise<Set<string>> {
   const attempts = await prisma.quizAttempt.findMany({
@@ -131,6 +148,46 @@ async function selectUnseenQuestion(playerId: string, difficulty: string, sessio
 
   // Dernier recours (ne devrait pas arriver car on a géré la réinitialisation): aléatoire dans la difficulté
   return null;
+}
+
+// Sélection dédiée pour premières questions enfant (Q1-Q4)
+async function selectKidFriendlyQuestion(playerId: string, sessionId?: string): Promise<any> {
+  const difficulty = 'easy';
+  const preferredCats = ['kids', 'enfants', 'enfant'];
+
+  // Préférer les catégories enfant si disponibles et non vues
+  for (const cat of preferredCats) {
+    const totalCat = await prisma.quizQuestion.count({ where: { difficulty, category: cat } });
+    if (totalCat === 0) continue;
+    const seenCat = await prisma.quizQuestionSeen.findMany({ where: { playerId, question: { difficulty, category: cat } }, select: { questionId: true } });
+    const seenIds = seenCat.map(s => s.questionId);
+    const remaining = totalCat - seenIds.length;
+    if (remaining <= 0) continue;
+    const skip = Math.floor(Math.random() * remaining);
+    const q = await prisma.quizQuestion.findFirst({ where: { difficulty, category: cat, id: { notIn: seenIds } }, skip });
+    if (q) return q;
+  }
+
+  // Fallback heuristique: choisir une question facile courte
+  const totalEasy = await prisma.quizQuestion.count({ where: { difficulty } });
+  if (totalEasy === 0) return null;
+  const seenAll = await prisma.quizQuestionSeen.findMany({ where: { playerId, question: { difficulty } }, select: { questionId: true } });
+  const seenIdsAll = new Set(seenAll.map(s => s.questionId));
+  const unseenCount = totalEasy - seenAll.length;
+  if (unseenCount <= 0) {
+    return await selectUnseenQuestion(playerId, difficulty, sessionId);
+  }
+  const batchSize = Math.min(20, unseenCount);
+  const batchSkip = Math.max(0, Math.floor(Math.random() * Math.max(1, unseenCount - batchSize)));
+  const candidates = await prisma.quizQuestion.findMany({ where: { difficulty, id: { notIn: Array.from(seenIdsAll) } }, take: batchSize, skip: batchSkip });
+  if (candidates.length === 0) return await selectUnseenQuestion(playerId, difficulty, sessionId);
+  const scored = candidates.map(c => {
+    const lenQ = (c.question || '').length;
+    const maxOpt = Math.max((c.optionA||'').length, (c.optionB||'').length, (c.optionC||'').length, (c.optionD||'').length);
+    const score = lenQ + maxOpt * 2; // plus petit = plus simple
+    return { c, score };
+  }).sort((a,b) => a.score - b.score);
+  return scored[0]?.c || candidates[0];
 }
 
 // Fonction pour marquer une question comme vue
@@ -259,9 +316,11 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: "Plus de saut disponible" });
       }
 
-      // Sélectionner une nouvelle question de même difficulté
+      // Sélectionner une nouvelle question de même difficulté (enfant si Q<=4)
       const diff = getDifficultyForQuestion(session.currentQuestion);
-      const nextQuestion = await selectUnseenQuestion(session.playerId, diff, session.id);
+      const nextQuestion = session.currentQuestion <= 4
+        ? await selectKidFriendlyQuestion(session.playerId, session.id)
+        : await selectUnseenQuestion(session.playerId, diff, session.id);
       if (!nextQuestion) {
         return reply.status(500).send({ error: "Aucune autre question disponible" });
       }
@@ -311,14 +370,18 @@ export async function registerQuizRoutes(app: FastifyInstance) {
           skipsLeft: Math.max(0, currentSkips - 1),
           nextPrize: getPrizeAmount(session.currentQuestion),
         },
-        question: {
-          id: nextQuestion.id,
-          text: nextQuestion.question,
-          optionA: nextQuestion.optionA,
-          optionB: nextQuestion.optionB,
-          optionC: nextQuestion.optionC,
-          optionD: nextQuestion.optionD,
-        },
+        question: (() => {
+          const qWithImg = attachImage(session.currentQuestion, nextQuestion);
+          return {
+            id: qWithImg.id,
+            text: qWithImg.question,
+            optionA: qWithImg.optionA,
+            optionB: qWithImg.optionB,
+            optionC: qWithImg.optionC,
+            optionD: qWithImg.optionD,
+            imageUrl: qWithImg.imageUrl || null,
+          };
+        })(),
       });
 
     } catch (err: any) {
@@ -453,8 +516,8 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         throw err;
       }
 
-  // Récupérer une question facile non vue (avec mélange des sujets)
-  const question = await selectUnseenQuestion(player.id, 'easy', session.id);
+  // Récupérer une question enfant (facile, catégories kids si possible)
+  const question = await selectKidFriendlyQuestion(player.id, session.id);
 
       if (!question) {
         // Rembourser le token si aucune question disponible
@@ -472,14 +535,18 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         securedAmount: 0,
         skipsLeft: 3,
         nextPrize: getPrizeAmount(1),
-        question: {
-          id: question.id,
-          text: question.question,
-          optionA: question.optionA,
-          optionB: question.optionB,
-          optionC: question.optionC,
-          optionD: question.optionD,
-        },
+        question: (() => {
+          const qWithImg = attachImage(1, question);
+          return {
+            id: qWithImg.id,
+            text: qWithImg.question,
+            optionA: qWithImg.optionA,
+            optionB: qWithImg.optionB,
+            optionC: qWithImg.optionC,
+            optionD: qWithImg.optionD,
+            imageUrl: qWithImg.imageUrl || null,
+          };
+        })(),
       });
 
     } catch (err: any) {
@@ -524,8 +591,10 @@ export async function registerQuizRoutes(app: FastifyInstance) {
   // Déterminer la difficulté à partir de la question courante (règle dynamique)
   const difficulty = getDifficultyForQuestion(activeSession.currentQuestion);
 
-    // Sélectionner une question non vue avec mélange des sujets
-    const question = await selectUnseenQuestion(player.id, difficulty, activeSession.id);
+    // Sélectionner une question non vue (enfant si Q<=4)
+    const question = activeSession.currentQuestion <= 4
+      ? await selectKidFriendlyQuestion(player.id, activeSession.id)
+      : await selectUnseenQuestion(player.id, difficulty, activeSession.id);
       if (!question) {
         return reply.status(500).send({ error: "Aucune question disponible pour reprise" });
       }
@@ -542,14 +611,18 @@ export async function registerQuizRoutes(app: FastifyInstance) {
           skipsLeft: (activeSession as any).skipsLeft ?? 0,
           nextPrize: getPrizeAmount(activeSession.currentQuestion),
         },
-        question: {
-          id: question.id,
-          text: question.question,
-          optionA: question.optionA,
-          optionB: question.optionB,
-          optionC: question.optionC,
-          optionD: question.optionD,
-        },
+        question: (() => {
+          const qWithImg = attachImage(activeSession.currentQuestion, question);
+          return {
+            id: qWithImg.id,
+            text: qWithImg.question,
+            optionA: qWithImg.optionA,
+            optionB: qWithImg.optionB,
+            optionC: qWithImg.optionC,
+            optionD: qWithImg.optionD,
+            imageUrl: qWithImg.imageUrl || null,
+          };
+        })(),
       });
 
     } catch (err: any) {
@@ -663,9 +736,11 @@ export async function registerQuizRoutes(app: FastifyInstance) {
           },
         });
 
-  // Récupérer la prochaine question (non vue) avec mélange des sujets
+  // Récupérer la prochaine question (non vue) - enfant si Q<=4
   const nextDifficulty = getDifficultyForQuestion(session.currentQuestion + 1);
-  const nextQuestion = await selectUnseenQuestion(session.player.id, nextDifficulty, session.id);
+  const nextQuestion = (session.currentQuestion + 1) <= 4
+    ? await selectKidFriendlyQuestion(session.player.id, session.id)
+    : await selectUnseenQuestion(session.player.id, nextDifficulty, session.id);
 
         if (!nextQuestion) {
           return reply.status(500).send({ error: "Erreur chargement question suivante" });
@@ -682,14 +757,18 @@ export async function registerQuizRoutes(app: FastifyInstance) {
           securedAmount: newSecuredAmount,
           skipsLeft: (session as any).skipsLeft ?? 0,
           nextPrize: getPrizeAmount(session.currentQuestion + 1),
-          question: {
-            id: nextQuestion.id,
-            text: nextQuestion.question,
-            optionA: nextQuestion.optionA,
-            optionB: nextQuestion.optionB,
-            optionC: nextQuestion.optionC,
-            optionD: nextQuestion.optionD,
-          },
+          question: (() => {
+            const qWithImg = attachImage(session.currentQuestion + 1, nextQuestion);
+            return {
+              id: qWithImg.id,
+              text: qWithImg.question,
+              optionA: qWithImg.optionA,
+              optionB: qWithImg.optionB,
+              optionC: qWithImg.optionC,
+              optionD: qWithImg.optionD,
+              imageUrl: qWithImg.imageUrl || null,
+            };
+          })(),
         });
 
       } else {
@@ -813,70 +892,6 @@ export async function registerQuizRoutes(app: FastifyInstance) {
       });
     } catch (err: any) {
       app.log.error({ err }, "Erreur génération manuelle IA");
-      return reply.status(500).send({ error: err.message });
-    }
-  });
-
-  // GET /api/quiz/stats - Statistiques des questions (admin)
-  app.get("/api/quiz/stats", { preHandler: requireAdmin(app) }, async (req, reply) => {
-    try {
-      const [total, easy, medium, hard, finance, economy, realEstate] = await Promise.all([
-        prisma.quizQuestion.count(),
-        prisma.quizQuestion.count({ where: { difficulty: 'easy' } }),
-        prisma.quizQuestion.count({ where: { difficulty: 'medium' } }),
-        prisma.quizQuestion.count({ where: { difficulty: 'hard' } }),
-        prisma.quizQuestion.count({ where: { category: 'finance' } }),
-        prisma.quizQuestion.count({ where: { category: 'economy' } }),
-        prisma.quizQuestion.count({ where: { category: 'real-estate' } }),
-      ]);
-
-      // Distinct questions déjà posées globalement
-      const [usedTotal, usedEasy, usedMedium, usedHard] = await Promise.all([
-        prisma.quizAttempt.findMany({ distinct: ["questionId"], select: { questionId: true } }).then(r => r.length),
-        prisma.quizAttempt.findMany({ where: { question: { difficulty: 'easy' } }, distinct: ["questionId"], select: { questionId: true } }).then(r => r.length),
-        prisma.quizAttempt.findMany({ where: { question: { difficulty: 'medium' } }, distinct: ["questionId"], select: { questionId: true } }).then(r => r.length),
-        prisma.quizAttempt.findMany({ where: { question: { difficulty: 'hard' } }, distinct: ["questionId"], select: { questionId: true } }).then(r => r.length),
-      ]);
-
-      const remaining = Math.max(0, total - usedTotal);
-      const remainingByDifficulty = {
-        easy: Math.max(0, easy - usedEasy),
-        medium: Math.max(0, medium - usedMedium),
-        hard: Math.max(0, hard - usedHard),
-      } as const;
-
-      const [usedFinance, usedEconomy, usedRealEstate] = await Promise.all([
-        prisma.quizAttempt.findMany({ where: { question: { category: 'finance' } }, distinct: ["questionId"], select: { questionId: true } }).then(r => r.length),
-        prisma.quizAttempt.findMany({ where: { question: { category: 'economy' } }, distinct: ["questionId"], select: { questionId: true } }).then(r => r.length),
-        prisma.quizAttempt.findMany({ where: { question: { category: 'real-estate' } }, distinct: ["questionId"], select: { questionId: true } }).then(r => r.length),
-      ]);
-      const remainingByCategory = {
-        finance: Math.max(0, finance - usedFinance),
-        economy: Math.max(0, economy - usedEconomy),
-        realEstate: Math.max(0, realEstate - usedRealEstate),
-      } as const;
-
-      // Catégories dynamiques: liste avec totaux/utilisées/restantes
-      const distinctCats = await prisma.quizQuestion.findMany({ distinct: ["category"], select: { category: true } });
-      const categories = [] as Array<{ category: string; total: number; used: number; remaining: number }>;
-      for (const c of distinctCats) {
-        const cat = c.category || 'uncategorized';
-        const t = await prisma.quizQuestion.count({ where: { category: cat } });
-        const u = await prisma.quizAttempt.findMany({ where: { question: { category: cat } }, distinct: ["questionId"], select: { questionId: true } }).then(r => r.length);
-        categories.push({ category: cat, total: t, used: u, remaining: Math.max(0, t - u) });
-      }
-
-      return reply.send({
-        total,
-        byDifficulty: { easy, medium, hard },
-        byCategory: { finance, economy, realEstate },
-        remaining,
-        remainingByDifficulty,
-        remainingByCategory,
-        categories,
-      });
-    } catch (err: any) {
-      app.log.error({ err }, "Erreur stats questions");
       return reply.status(500).send({ error: err.message });
     }
   });

@@ -13,7 +13,7 @@ interface GeneratedQuestion {
   optionD: string;
   correctAnswer: 'A' | 'B' | 'C' | 'D';
   difficulty: 'easy' | 'medium' | 'hard';
-  category: 'finance' | 'economy' | 'real-estate' | 'business' | 'technology' | 'science' | 'history' | 'geography' | 'sports' | 'arts' | 'cinema' | 'music' | 'literature' | 'culture' | 'nature' | 'health' | 'food' | 'general' | 'animals' | 'translation';
+  category: 'finance' | 'economy' | 'real-estate' | 'business' | 'technology' | 'science' | 'history' | 'geography' | 'sports' | 'arts' | 'cinema' | 'music' | 'literature' | 'culture' | 'nature' | 'health' | 'food' | 'general' | 'animals' | 'translation' | 'kids' | 'enfants';
   imageUrl?: string; // URL optionnelle d'une image illustrant la question
 }
 
@@ -38,6 +38,7 @@ Catégories disponibles:
 - general: Culture générale variée, faits intéressants
 - animals: Zoologie, espèces, habitats, comportements, chaînes alimentaires
 - translation: Traduction FR/EN, faux amis, synonymes, expressions courantes
+ - kids, enfants: Questions pour enfants (6–9 ans), vocabulaire simple, monde concret, thèmes ludiques
 
 Pour certaines questions, tu peux ajouter une image pour illustrer (personnage historique, monument, animal, œuvre d'art, etc.). Utilise des URLs d'images Unsplash ou Pexels en haute qualité.
 
@@ -72,6 +73,69 @@ IMPORTANT pour imageUrl:
 - Laisse vide si pas nécessaire
 - Images haute qualité et pertinentes uniquement`;
 
+// Prompt spécifique pour ENFANTS (6-9 ans)
+const KIDS_SYSTEM_PROMPT = `Tu es un pédagogue qui crée des questions de quiz pour des enfants de 6 à 9 ans.
+
+Objectifs:
+- Questions TRÈS simples, une seule idée par question
+- Mots courts, phrases courtes, sans jargon
+- Thèmes concrets: animaux, couleurs, formes, objets du quotidien, saisons, jours, chiffres 1–10
+- 4 options claires; une seule est correcte
+- Ton bienveillant, ludique, zéro piège
+
+Contraintes:
+- Difficulté: "easy" uniquement
+- Catégorie: "kids"
+- JSON strict au format:
+{
+  "questions": [
+    {
+      "question": "...",
+      "optionA": "...",
+      "optionB": "...",
+      "optionC": "...",
+      "optionD": "...",
+      "correctAnswer": "A",
+      "difficulty": "easy",
+      "category": "kids"
+    }
+  ]
+}
+
+N'utilise pas d'URL d'image, laisse l'IA serveur gérer les images. Réponds UNIQUEMENT le JSON.`;
+
+async function generateKidsQuestionsWithAI(count: number = 10): Promise<GeneratedQuestion[]> {
+  if (!process.env.OPENAI_API_KEY) {
+    console.warn("[AI] OPENAI_API_KEY non configurée (kids), génération IA désactivée");
+    return [];
+  }
+  try {
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: KIDS_SYSTEM_PROMPT },
+        { role: "user", content: `Génère exactement ${count} questions.` }
+      ],
+      temperature: 0.7,
+      max_tokens: 2000,
+      response_format: { type: "json_object" }
+    });
+    const content = completion.choices[0]?.message?.content;
+    if (!content) throw new Error("Pas de réponse de l'IA (kids)");
+    const parsed = JSON.parse(content);
+    const questions = parsed.questions || [];
+    const valid = questions.filter((q: any) =>
+      q.question && q.optionA && q.optionB && q.optionC && q.optionD &&
+      ['A','B','C','D'].includes(q.correctAnswer) &&
+      q.difficulty === 'easy' && (q.category === 'kids' || q.category === 'enfants')
+    );
+    return valid as GeneratedQuestion[];
+  } catch (e: any) {
+    console.error("[AI] Erreur génération kids:", e.message);
+    return [];
+  }
+}
+
 const difficultyPrompts = {
   easy: "Questions simples sur les concepts de base (définitions, règles du jeu, symboles boursiers). Niveau débutant.",
   medium: "Questions intermédiaires nécessitant réflexion (calculs simples, stratégies de base, comparaisons). Niveau intermédiaire.",
@@ -79,7 +143,7 @@ const difficultyPrompts = {
 };
 
 export const allowedCategories = [
-  'finance','economy','real-estate','business','technology','science','history','geography','sports','arts','cinema','music','literature','culture','nature','health','food','general','animals','translation'
+  'finance','economy','real-estate','business','technology','science','history','geography','sports','arts','cinema','music','literature','culture','nature','health','food','general','animals','translation','kids','enfants'
 ] as const;
 
 const categoryPrompts = {
@@ -102,7 +166,9 @@ const categoryPrompts = {
   food: "Cuisine, recettes, ingrédients, restaurants, spécialités culinaires",
   general: "Culture générale, faits intéressants, anecdotes, connaissances diverses",
   animals: "Zoologie, animaux domestiques et sauvages, habitats, chaînes alimentaires, comportements",
-  translation: "Traduction français-anglais, faux amis, synonymes, expressions idiomatiques, conjugaison simple"
+  translation: "Traduction français-anglais, faux amis, synonymes, expressions idiomatiques, conjugaison simple",
+  kids: "Questions pour enfants très simples: objets du quotidien, animaux familiers, couleurs, chiffres 1-10",
+  enfants: "Questions très faciles (6-9 ans): vocabulaire simple, monde concret, réponses évidentes"
 };
 
 /**
@@ -137,6 +203,13 @@ function shuffleAnswers(q: GeneratedQuestion): GeneratedQuestion {
     optionD: options[3].text,
     correctAnswer: newCorrectLetter,
   };
+}
+
+// Image locale par défaut selon la difficulté
+function defaultImageForDifficulty(diff: 'easy'|'medium'|'hard'): string {
+  if (diff === 'easy') return '/images/quiz/easy-default.svg';
+  if (diff === 'medium') return '/images/quiz/medium-default.svg';
+  return '/images/quiz/hard-default.svg';
 }
 
 /**
@@ -179,7 +252,7 @@ async function isDuplicate(question: string): Promise<boolean> {
  */
 export async function generateQuestionsWithAI(
   difficulty: 'easy' | 'medium' | 'hard',
-  category: 'finance' | 'economy' | 'real-estate' | 'business' | 'technology' | 'science' | 'history' | 'geography' | 'sports' | 'arts' | 'cinema' | 'music' | 'literature' | 'culture' | 'nature' | 'health' | 'food' | 'general' | 'animals' | 'translation',
+  category: typeof allowedCategories[number],
   count: number = 5
 ): Promise<GeneratedQuestion[]> {
   
@@ -252,6 +325,8 @@ export async function generateAndSaveQuestions(): Promise<number> {
   try {
     // Générer des questions diversifiées sur tous les sujets (100 questions total)
     const batches = [
+      // Pool enfants dédié (ajout initial pour alimenter Q1-Q4) - petites séries
+      { difficulty: 'easy' as const, category: 'kids' as const, count: 6 },
       // Questions faciles (40 questions) - Culture générale accessible
       { difficulty: 'easy' as const, category: 'general' as const, count: 5 },
       { difficulty: 'easy' as const, category: 'geography' as const, count: 4 },
@@ -307,7 +382,12 @@ export async function generateAndSaveQuestions(): Promise<number> {
       console.log(`[AI] Génération: ${batch.count} questions ${batch.difficulty}/${batch.category}...`);
       const questions = await generateQuestionsWithAI(batch.difficulty, batch.category, batch.count);
       
-      for (const q of questions) {
+      // Si batch catégorie 'kids': regénérer via prompt dédié pour meilleure qualité enfant
+      const effectiveQuestions = batch.category === 'kids'
+        ? await generateKidsQuestionsWithAI(batch.count)
+        : questions;
+
+      for (const q of effectiveQuestions) {
         try {
           // Vérifier si c'est un doublon
           const duplicate = await isDuplicate(q.question);
@@ -329,8 +409,8 @@ export async function generateAndSaveQuestions(): Promise<number> {
               optionD: shuffled.optionD,
               correctAnswer: shuffled.correctAnswer,
               difficulty: shuffled.difficulty,
-              category: shuffled.category,
-              imageUrl: shuffled.imageUrl || null, // Image optionnelle
+              category: batch.category === 'kids' ? 'kids' : shuffled.category,
+              imageUrl: defaultImageForDifficulty(shuffled.difficulty),
             }
           });
           totalCreated++;
@@ -394,7 +474,7 @@ export async function generateTwentyPerCategory(): Promise<number> {
                 correctAnswer: shuffled.correctAnswer,
                 difficulty: shuffled.difficulty,
                 category: shuffled.category,
-                imageUrl: shuffled.imageUrl || null,
+                imageUrl: defaultImageForDifficulty(shuffled.difficulty),
               }
             });
             totalCreated++;
@@ -453,7 +533,7 @@ async function generateAndSaveBatch(diff: 'easy'|'medium'|'hard', cat: typeof al
           correctAnswer: shuffled.correctAnswer,
           difficulty: shuffled.difficulty,
           category: shuffled.category,
-          imageUrl: shuffled.imageUrl || null,
+          imageUrl: defaultImageForDifficulty(shuffled.difficulty),
         }
       });
       created++;
@@ -482,7 +562,44 @@ export async function maintainQuestionStock(min = 300, target = 400): Promise<{ 
   }
 
   console.log(`[AI] Stock faible (remaining=${remaining} < ${min}) → génération par petits lots jusqu'à ${target}`);
-  let created = 0;
+
+  // 1) Assurer un stock minimum de questions enfants faciles (catégorie kids/enfants)
+  const kidsCategories = ['kids','enfants'] as const;
+  const kidsTotal = await prisma.quizQuestion.count({ where: { category: { in: kidsCategories as any } } });
+  const kidsUsed = await prisma.quizAttempt.findMany({ where: { question: { category: { in: kidsCategories as any } } }, distinct: ["questionId"], select: { questionId: true } }).then(r => r.length);
+  const kidsRemaining = Math.max(0, kidsTotal - kidsUsed);
+  const minKids = 150;
+  const targetKids = 200;
+  let createdKids = 0;
+  if (kidsRemaining < minKids) {
+    const needKids = targetKids - kidsRemaining;
+    const batchSize = Math.max(5, Math.min(20, needKids));
+    const kidsBatch = await generateKidsQuestionsWithAI(batchSize);
+    for (const q0 of kidsBatch) {
+      try {
+        const q = { ...q0, difficulty: 'easy' as const, category: 'kids' as const };
+        if (await isDuplicate(q.question)) continue;
+        const shuffled = shuffleAnswers(q);
+        await prisma.quizQuestion.create({
+          data: {
+            question: shuffled.question,
+            optionA: shuffled.optionA,
+            optionB: shuffled.optionB,
+            optionC: shuffled.optionC,
+            optionD: shuffled.optionD,
+            correctAnswer: shuffled.correctAnswer,
+            difficulty: 'easy',
+            category: 'kids',
+            imageUrl: defaultImageForDifficulty('easy'),
+          }
+        });
+        createdKids++;
+      } catch {}
+    }
+    // petite pause
+    await new Promise(r => setTimeout(r, 400));
+  }
+  let created = createdKids;
   const diffs: Array<'easy'|'medium'|'hard'> = ['easy','medium','hard'];
 
   // Boucle de petits batches (max ~50 itérations de sécurité)
