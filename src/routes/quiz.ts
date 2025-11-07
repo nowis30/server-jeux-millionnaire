@@ -3,6 +3,7 @@ import { prisma } from "../prisma";
 import { z } from "zod";
 import { requireUserOrGuest, requireAdmin } from "./auth";
 import { generateAndSaveQuestions, maintainQuestionStock, replenishIfLow } from "../services/aiQuestions";
+import { ensureKidsImageQuestions, selectKidImageQuestion } from "../services/kidsImageQuestions";
 import {
   updatePlayerTokens,
   consumeQuizToken,
@@ -516,8 +517,14 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         throw err;
       }
 
-  // Récupérer une question enfant (facile, catégories kids si possible)
-  const question = await selectKidFriendlyQuestion(player.id, session.id);
+  // Garantir la présence d'un petit stock de questions enfants avec image locale
+  try { await ensureKidsImageQuestions(); } catch {}
+  // Récupérer une question enfant avec image locale si possible
+  let question = await selectKidImageQuestion(player.id);
+  if (!question) {
+    // fallback vers sélection enfant générique
+    question = await selectKidFriendlyQuestion(player.id, session.id);
+  }
 
       if (!question) {
         // Rembourser le token si aucune question disponible
@@ -593,7 +600,7 @@ export async function registerQuizRoutes(app: FastifyInstance) {
 
     // Sélectionner une question non vue (enfant si Q<=4)
     const question = activeSession.currentQuestion <= 4
-      ? await selectKidFriendlyQuestion(player.id, activeSession.id)
+      ? (await selectKidImageQuestion(player.id)) || await selectKidFriendlyQuestion(player.id, activeSession.id)
       : await selectUnseenQuestion(player.id, difficulty, activeSession.id);
       if (!question) {
         return reply.status(500).send({ error: "Aucune question disponible pour reprise" });
@@ -739,7 +746,7 @@ export async function registerQuizRoutes(app: FastifyInstance) {
   // Récupérer la prochaine question (non vue) - enfant si Q<=4
   const nextDifficulty = getDifficultyForQuestion(session.currentQuestion + 1);
   const nextQuestion = (session.currentQuestion + 1) <= 4
-    ? await selectKidFriendlyQuestion(session.player.id, session.id)
+    ? (await selectKidImageQuestion(session.player.id)) || await selectKidFriendlyQuestion(session.player.id, session.id)
     : await selectUnseenQuestion(session.player.id, nextDifficulty, session.id);
 
         if (!nextQuestion) {
