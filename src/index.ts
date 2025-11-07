@@ -25,6 +25,7 @@ import { cleanupMarketTicks } from "./services/tickCleanup";
 import { registerQuizRoutes } from "./routes/quiz";
 import { registerReferralRoutes } from "./routes/referrals";
 import { generateAndSaveQuestions, replenishIfLow, maintainQuestionStock } from "./services/aiQuestions";
+import { ensurePropertyTypeQuotas } from "./services/seeder";
 
 async function bootstrap() {
   // Exécuter les migrations Prisma au démarrage (idempotent). Utile sur Render sans shell.
@@ -199,6 +200,21 @@ async function bootstrap() {
     io.close();
   });
 
+  // Vérification immédiate au démarrage: assurer une banque suffisante et des 6‑plex présents
+  try {
+    const quotas = await ensurePropertyTypeQuotas(5);
+    app.log.info({ quotas }, "[boot] Quotas immo assurés (min 5 par type)");
+    const count = await prisma.propertyTemplate.count();
+    if (count < 50) {
+      const { seedAll } = await import("./services/seeder");
+      app.log.info({ count }, "[boot] Banque immo < 50 → top-up global");
+      const res = await seedAll(50);
+      app.log.info({ result: res }, "[boot] Banque immo remontée à 50");
+    }
+  } catch (e) {
+    app.log.warn({ err: e }, "[boot] Vérification/reseed banque immo a échoué");
+  }
+
   const hourlyCron = cron.validate(env.CRON_TICK) ? env.CRON_TICK : "0 * * * *";
   if (hourlyCron !== env.CRON_TICK) {
     app.log.warn({ provided: env.CRON_TICK }, "Expression CRON invalide, utilisation du fallback '0 * * * *'");
@@ -252,6 +268,24 @@ async function bootstrap() {
       }
     } catch (e) {
       app.log.warn({ err: e }, "[cron] Vérification/reseed banque immo a échoué");
+    }
+  }, { timezone: env.TIMEZONE });
+
+  // Cron toutes les 5 minutes: quotas par type (incl. 6‑plex) + minimum total 50
+  cron.schedule("*/5 * * * *", async () => {
+    app.log.info("[cron] immo (5 min): vérifier quotas et banque");
+    try {
+      const quotas = await ensurePropertyTypeQuotas(5);
+      app.log.info({ quotas }, "[cron] immo (5 min): quotas assurés (min 5 par type)");
+      const count = await prisma.propertyTemplate.count();
+      if (count < 50) {
+        const { seedAll } = await import("./services/seeder");
+        app.log.info({ count }, "[cron] immo (5 min): banque < 50 → top-up global");
+        const res = await seedAll(50);
+        app.log.info({ result: res }, "[cron] immo (5 min): banque remontée à 50");
+      }
+    } catch (err) {
+      app.log.error({ err }, "[cron] immo (5 min): échec quotas/top-up");
     }
   }, { timezone: env.TIMEZONE });
 
@@ -362,6 +396,21 @@ async function bootstrap() {
       }
     } catch (err) {
       app.log.error({ err }, "Erreur maintien du stock IA");
+    }
+  }, { timezone: env.TIMEZONE });
+
+  // Vérification/rappel toutes les 5 minutes: s'assurer qu'il y a bien 1000 questions "restantes"
+  // et demander à l'IA de remplir la base si nécessaire (pas de doublons, 3 niveaux de difficulté).
+  cron.schedule("*/5 * * * *", async () => {
+    try {
+      const { remaining, created, target } = await maintainQuestionStock(1000, 1000);
+      if (created > 0) {
+        app.log.info({ remainingBefore: remaining, created, target }, "[cron] AI (5 min): stock complété jusqu'à 1000");
+      } else {
+        app.log.info({ remaining }, "[cron] AI (5 min): stock OK (≥1000)");
+      }
+    } catch (err) {
+      app.log.error({ err }, "[cron] AI (5 min): échec vérification/complément stock");
     }
   }, { timezone: env.TIMEZONE });
 
