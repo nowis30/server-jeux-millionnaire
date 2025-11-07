@@ -3,7 +3,6 @@ import { prisma } from "../prisma";
 import { z } from "zod";
 import { requireUserOrGuest, requireAdmin } from "./auth";
 import { generateAndSaveQuestions, maintainQuestionStock, replenishIfLow } from "../services/aiQuestions";
-import { ensureKidsImageQuestions, selectKidImageQuestion } from "../services/kidsImageQuestions";
 import {
   updatePlayerTokens,
   consumeQuizToken,
@@ -34,20 +33,13 @@ const COOLDOWN_MINUTES = 60;
 const MAX_QUESTIONS = 10;
 
 // Images enfant pour les 4 premières questions (thèmes simples, pédagogiques)
-const CHILD_FRIENDLY_IMAGES: Record<number, string> = {
-  1: "/images/quiz/easy1.svg",
-  2: "/images/quiz/easy2.svg",
-  3: "/images/quiz/easy3.svg",
-  4: "/images/quiz/easy4.svg",
-};
+// Ancienne configuration d'images enfants désactivée
+const CHILD_FRIENDLY_IMAGES: Record<number, string> = {};
 
-function attachImage(questionNumber: number, q: any) {
+// Désactivation des images enfants personnalisées: ne retourne plus d'image spécifique
+function attachImage(_questionNumber: number, q: any) {
   if (!q) return q;
-  const img = CHILD_FRIENDLY_IMAGES[questionNumber];
-  if (img) {
-    return { ...q, imageUrl: img };
-  }
-  return q;
+  return { ...q, imageUrl: null };
 }
 
 // Récupérer les catégories déjà utilisées dans la session courante
@@ -380,7 +372,7 @@ export async function registerQuizRoutes(app: FastifyInstance) {
             optionB: qWithImg.optionB,
             optionC: qWithImg.optionC,
             optionD: qWithImg.optionD,
-            imageUrl: qWithImg.imageUrl || null,
+            imageUrl: null,
           };
         })(),
       });
@@ -517,14 +509,8 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         throw err;
       }
 
-  // Garantir la présence d'un petit stock de questions enfants avec image locale
-  try { await ensureKidsImageQuestions(); } catch {}
-  // Récupérer une question enfant avec image locale si possible
-  let question = await selectKidImageQuestion(player.id);
-  if (!question) {
-    // fallback vers sélection enfant générique
-    question = await selectKidFriendlyQuestion(player.id, session.id);
-  }
+  // Sélection classique enfant sans image spécifique
+  const question = await selectKidFriendlyQuestion(player.id, session.id);
 
       if (!question) {
         // Rembourser le token si aucune question disponible
@@ -551,7 +537,7 @@ export async function registerQuizRoutes(app: FastifyInstance) {
             optionB: qWithImg.optionB,
             optionC: qWithImg.optionC,
             optionD: qWithImg.optionD,
-            imageUrl: qWithImg.imageUrl || null,
+            imageUrl: null,
           };
         })(),
       });
@@ -600,7 +586,7 @@ export async function registerQuizRoutes(app: FastifyInstance) {
 
     // Sélectionner une question non vue (enfant si Q<=4)
     const question = activeSession.currentQuestion <= 4
-      ? (await selectKidImageQuestion(player.id)) || await selectKidFriendlyQuestion(player.id, activeSession.id)
+      ? await selectKidFriendlyQuestion(player.id, activeSession.id)
       : await selectUnseenQuestion(player.id, difficulty, activeSession.id);
       if (!question) {
         return reply.status(500).send({ error: "Aucune question disponible pour reprise" });
@@ -746,7 +732,7 @@ export async function registerQuizRoutes(app: FastifyInstance) {
   // Récupérer la prochaine question (non vue) - enfant si Q<=4
   const nextDifficulty = getDifficultyForQuestion(session.currentQuestion + 1);
   const nextQuestion = (session.currentQuestion + 1) <= 4
-    ? (await selectKidImageQuestion(session.player.id)) || await selectKidFriendlyQuestion(session.player.id, session.id)
+    ? await selectKidFriendlyQuestion(session.player.id, session.id)
     : await selectUnseenQuestion(session.player.id, nextDifficulty, session.id);
 
         if (!nextQuestion) {
@@ -773,7 +759,7 @@ export async function registerQuizRoutes(app: FastifyInstance) {
               optionB: qWithImg.optionB,
               optionC: qWithImg.optionC,
               optionD: qWithImg.optionD,
-              imageUrl: qWithImg.imageUrl || null,
+              imageUrl: null,
             };
           })(),
         });
