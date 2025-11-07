@@ -93,6 +93,24 @@ export async function registerPropertyRoutes(app: FastifyInstance) {
     return reply.send({ holdings });
   });
 
+  // Récupérer le propriétaire (pseudo) d'un template déjà acheté dans une partie
+  app.get("/api/games/:gameId/properties/owner/:templateId", async (req, reply) => {
+    const paramsSchema = z.object({ gameId: z.string(), templateId: z.string() });
+    try {
+      const { gameId, templateId } = paramsSchema.parse((req as any).params);
+      const holding = await app.prisma.propertyHolding.findFirst({
+        where: { gameId, templateId },
+        select: { playerId: true },
+      });
+      if (!holding) return reply.send({ ownerNickname: null });
+      const player = await app.prisma.player.findUnique({ where: { id: holding.playerId }, select: { nickname: true } });
+      return reply.send({ ownerNickname: player?.nickname ?? null });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Erreur";
+      return reply.status(400).send({ error: message });
+    }
+  });
+
   app.post("/api/games/:gameId/properties/purchase", async (req, reply) => {
     const paramsSchema = z.object({ gameId: z.string() });
     const bodySchema = z.object({
