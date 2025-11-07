@@ -193,8 +193,12 @@ export async function registerAuthRoutes(app: FastifyInstance) {
 
   // logout
   app.post("/api/auth/logout", async (_req, reply) => {
-    reply.clearCookie("hm_auth", { path: "/" });
-    reply.clearCookie("hm_csrf", { path: "/" });
+    // Important: utiliser les mêmes attributs que lors du setCookie pour garantir la suppression sur tous les navigateurs
+    const common = { path: "/", sameSite: "none" as const, secure: true };
+    reply.clearCookie("hm_auth", common);
+    reply.clearCookie("hm_csrf", common);
+    // Optionnel: on retire aussi l'identifiant invité pour repartir proprement
+    reply.clearCookie("hm_guest", common);
     return reply.send({ ok: true });
   });
 
