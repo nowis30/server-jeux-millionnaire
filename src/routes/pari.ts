@@ -48,14 +48,18 @@ export async function registerPariRoutes(app: FastifyInstance) {
   // POST /api/games/:gameId/pari/play  { bet }
   app.post('/api/games/:gameId/pari/play', { preHandler: requireUserOrGuest(app) }, async (req, reply) => {
     const paramsSchema = z.object({ gameId: z.string() });
-    const bodySchema = z.object({ bet: z.number().int().positive() });
+  const bodySchema = z.object({ bet: z.number().int().positive().max(1_000_000_000) });
     const { gameId } = paramsSchema.parse((req as any).params);
     const { bet } = bodySchema.parse((req as any).body);
     const user = (req as any).user;
 
     const MIN_BET = 5000;
+    const MAX_BET = 1_000_000_000;
     if (bet < MIN_BET) {
       return reply.status(400).send({ error: `Mise minimum ${MIN_BET}` });
+    }
+    if (bet > MAX_BET) {
+      return reply.status(400).send({ error: `Mise maximum ${MAX_BET}` });
     }
 
     // Résolution du joueur comme dans quiz (priorité header, middleware, guestId)
