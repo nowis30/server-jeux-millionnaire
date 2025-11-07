@@ -516,6 +516,73 @@ export async function ensureKidsPool(minKids = 450, targetKids = 500): Promise<{
 }
 
 /**
+ * Assure un stock minimum de questions MEDIUM pour les catégories ciblées (definitions, quebec)
+ * Utilisé pour alimenter préférentiellement Q5-Q7.
+ * Ne génère que des questions medium dans ces catégories, sans doublons.
+ */
+export async function ensureMediumPool(minMedium = 450, targetMedium = 500): Promise<{ created: number; remaining: number; target: number }> {
+  const mediumCats = ['definitions','quebec'] as const;
+  // Compter total et utilisées (distinct attempts) pour ces catégories difficulté medium
+  const mediumTotal = await prisma.quizQuestion.count({ where: { category: { in: mediumCats as any }, difficulty: 'medium' } });
+  const mediumUsed = await prisma.quizAttempt.findMany({ where: { question: { category: { in: mediumCats as any }, difficulty: 'medium' } }, distinct: ['questionId'], select: { questionId: true } }).then(r => r.length);
+  const mediumRemaining = Math.max(0, mediumTotal - mediumUsed);
+
+  if (!process.env.OPENAI_API_KEY) {
+    console.warn('[AI] OPENAI_API_KEY manquante – ensureMediumPool ne peut pas générer');
+    return { created: 0, remaining: mediumRemaining, target: targetMedium };
+  }
+
+  if (mediumRemaining >= minMedium) {
+    return { created: 0, remaining: mediumRemaining, target: targetMedium };
+  }
+
+  const toCreate = Math.max(0, targetMedium - mediumRemaining);
+  let created = 0;
+  const batchSize = 10;
+  // Pré-charger pour déduplication rapide
+  const existingMedium = await prisma.quizQuestion.findMany({ where: { category: { in: mediumCats as any }, difficulty: 'medium' }, select: { question: true } });
+  const existingSet = new Set(existingMedium.map(q => q.question.toLowerCase().trim()));
+
+  // Boucles de génération alternant entre definitions et quebec
+  for (let i = 0; i < Math.ceil(toCreate / batchSize); i++) {
+    for (const cat of mediumCats) {
+      if (created >= toCreate) break;
+      try {
+        const raw = await generateQuestionsWithAI('medium', cat as any, Math.min(batchSize, toCreate - created));
+        for (const q0 of raw) {
+          try {
+            const key = q0.question.toLowerCase().trim();
+            if (existingSet.has(key)) continue;
+            if (q0.difficulty !== 'medium' || q0.category !== cat) continue;
+            const isDup = await isDuplicate(q0.question);
+            if (isDup) continue;
+            const shuffled = shuffleAnswers({ ...q0, difficulty: 'medium', category: cat } as any);
+            await prisma.quizQuestion.create({
+              data: {
+                question: shuffled.question,
+                optionA: shuffled.optionA,
+                optionB: shuffled.optionB,
+                optionC: shuffled.optionC,
+                optionD: shuffled.optionD,
+                correctAnswer: shuffled.correctAnswer,
+                difficulty: 'medium',
+                category: cat,
+                imageUrl: null,
+              }
+            });
+            created++;
+            existingSet.add(key);
+          } catch {}
+        }
+        await new Promise(r => setTimeout(r, 400));
+      } catch {}
+    }
+  }
+
+  return { created, remaining: mediumRemaining + created, target: targetMedium };
+}
+
+/**
  * Génère 20 questions par catégorie (réparties 7 easy, 7 medium, 6 hard)
  */
 export async function generateTwentyPerCategory(): Promise<number> {

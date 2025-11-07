@@ -24,7 +24,7 @@ import { registerEconomyRoutes } from "./routes/economy";
 import { cleanupMarketTicks } from "./services/tickCleanup";
 import { registerQuizRoutes } from "./routes/quiz";
 import { registerReferralRoutes } from "./routes/referrals";
-import { generateAndSaveQuestions, replenishIfLow, maintainQuestionStock, ensureKidsPool } from "./services/aiQuestions";
+import { generateAndSaveQuestions, replenishIfLow, maintainQuestionStock, ensureKidsPool, ensureMediumPool } from "./services/aiQuestions";
 import { ensurePropertyTypeQuotas } from "./services/seeder";
 
 async function bootstrap() {
@@ -331,6 +331,20 @@ async function bootstrap() {
       }
     } catch (err: any) {
       app.log.warn({ err: err?.message || err }, "[cron] Kids ensureKidsPool a échoué");
+    }
+  }, { timezone: env.TIMEZONE });
+
+  // Quiz medium ciblé (definitions, quebec): top-up nocturne (03:20) vers 500
+  cron.schedule("20 3 * * *", async () => {
+    try {
+      const res = await ensureMediumPool(480, 500);
+      if (res.created > 0) {
+        app.log.info({ remainingBefore: res.remaining, created: res.created, target: res.target }, "[cron] Medium ciblé: pool complété vers 500");
+      } else {
+        app.log.info({ remaining: res.remaining }, "[cron] Medium ciblé: pool OK (≥480)");
+      }
+    } catch (err: any) {
+      app.log.warn({ err: err?.message || err }, "[cron] ensureMediumPool a échoué");
     }
   }, { timezone: env.TIMEZONE });
 
