@@ -39,14 +39,39 @@ export async function registerPropertyRoutes(app: FastifyInstance) {
   // - Et un total minimal de 50 templates au global
   app.post("/api/properties/replenish", async (req, reply) => {
     try {
+      const body = typeof (req as any).body === 'string' ? JSON.parse((req as any).body) : ((req as any).body || {});
+      const gameId: string | undefined = body?.gameId || (req as any).query?.gameId;
       const quotas = await ensurePropertyTypeQuotas(5);
-      const before = await app.prisma.propertyTemplate.count();
-      let created = 0;
-      if (before < 50) {
-        created = await seedTemplatesGenerate(50);
+
+      // Compter les templates DISPONIBLES pour ce jeu (non achetés dans cette partie + pas d'anciennes images picsum)
+      const excludeOld = { NOT: { imageUrl: { startsWith: "https://picsum.photos" } } } as const;
+      let available = 0;
+      if (gameId) {
+        const purchased = await app.prisma.propertyHolding.findMany({ where: { gameId }, select: { templateId: true } });
+        const purchasedIds = Array.from(new Set(purchased.map((p: any) => p.templateId))).filter(Boolean);
+        available = await app.prisma.propertyTemplate.count({ where: purchasedIds.length ? { AND: [excludeOld as any, { id: { notIn: purchasedIds } }] } : (excludeOld as any) });
+      } else {
+        available = await app.prisma.propertyTemplate.count({ where: excludeOld as any });
       }
+
+      // Si disponibles < 50, générer assez pour atteindre ce seuil de DISPONIBLES
+      let created = 0;
+      if (available < 50) {
+        const totalNow = await app.prisma.propertyTemplate.count();
+        const needed = 50 - available;
+        created = await seedTemplatesGenerate(totalNow + needed);
+        // Recompter après création
+        if (gameId) {
+          const purchased = await app.prisma.propertyHolding.findMany({ where: { gameId }, select: { templateId: true } });
+          const purchasedIds = Array.from(new Set(purchased.map((p: any) => p.templateId))).filter(Boolean);
+          available = await app.prisma.propertyTemplate.count({ where: purchasedIds.length ? { AND: [excludeOld as any, { id: { notIn: purchasedIds } }] } : (excludeOld as any) });
+        } else {
+          available = await app.prisma.propertyTemplate.count({ where: excludeOld as any });
+        }
+      }
+
       const total = await app.prisma.propertyTemplate.count();
-      return reply.send({ ok: true, before, created, total, quotas });
+      return reply.send({ ok: true, available, created, total, quotas });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Erreur de remplissage";
       return reply.status(500).send({ error: message });

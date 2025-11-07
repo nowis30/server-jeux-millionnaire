@@ -40,6 +40,7 @@ function illustrationForType(t: string): string {
   if (key.includes("triplex")) return "/images/props/triplex.svg";
   if (/(quadruplex|4-?plex|fourplex)/i.test(t)) return "/images/props/quadruplex.svg";
   if (/(6-?plex|sixplex|six-?plex)/i.test(t)) return "/images/props/6plex.svg";
+  if (/(tour|tower|condo)/i.test(t)) return "/images/props/tower.svg";
   if (/(commercial|commerciale)/i.test(t)) return "/images/props/commercial.svg";
   return "/images/props/maison.svg";
 }
@@ -106,16 +107,16 @@ export async function seedTemplatesGenerate(minTotal = 50): Promise<number> {
   const templates = Array.from({ length: toCreate }).map((_, idx) => {
     const i = startIndex + idx;
     const city = pick(QC_CITIES, i);
-    const price = 180_000 + (i % 50) * 35_000;
     const units = 1 + (i % 6);
-    
-    // Loyers augmentés de ~30% pour meilleure rentabilité
-    const baseRent = clamp(1000 + (i % 10) * 120, 950, 2800);
-    
-    // Dépenses réduites de ~25% pour meilleur cash flow
-    const taxes = clamp(1_500 + (i % 50) * 140, 1_200, 7_000);
-    const insurance = clamp(550 + (i % 50) * 35, 400, 2_500);
-    const maintenance = clamp(700 + (i % 50) * 75, 500, 5_500);
+    // Loyers: base réaliste, puis prix calculé à 10–14x revenus annuels
+    const baseRent = clamp(1000 + (i % 10) * 120, 900, 2800);
+    const annualGross = baseRent * units * 12;
+    const grm = 10 + (i % 5); // 10..14
+    const price = Math.round(annualGross * grm);
+    // Dépenses (taxes/assurance/entretien) plausibles
+    const taxes = clamp(Math.round(annualGross * 0.10), 1_000, 10_000);
+    const insurance = clamp(Math.round(annualGross * 0.04), 300, 4_000);
+    const maintenance = clamp(Math.round(annualGross * 0.06), 500, 6_000);
     
     const cycle = ["bon", "moyen", "à rénover"] as const;
     const plumbingState = pick(cycle as unknown as string[], i + 1);
@@ -182,7 +183,7 @@ export async function ensurePropertyTypeQuotas(minPerType = 5) {
       const city = cities[(i + created) % cities.length];
       const baseRent = randi(spec.rentMin, spec.rentMax);
       const annualGross = baseRent * spec.units * 12;
-      const grm = Math.round(rand(10, 15) * 10) / 10; // 10.0..15.0
+      const grm = Math.round(rand(10, 14) * 10) / 10; // 10.0..14.0
       const price = Math.round(annualGross * grm);
       const expensesAnnual = Math.round(annualGross * rand(0.25, 0.35));
       const taxes = Math.round(expensesAnnual * 0.4);
@@ -192,7 +193,7 @@ export async function ensurePropertyTypeQuotas(minPerType = 5) {
       const electricityState = ["bon", "moyen", "à rénover"][ (i+1) % 3];
       const roofState = ["bon", "moyen", "à rénover"][ (i+2) % 3];
       const name = `${spec.label} (auto) #${Date.now()}-${i}`;
-      const imageUrl = illustrationForType(spec.label);
+  const imageUrl = illustrationForType(spec.label);
 
       await prisma.propertyTemplate.create({
         data: {
