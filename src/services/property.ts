@@ -22,7 +22,12 @@ export async function purchaseProperty({
 }: PurchasePropertyInput) {
   // Empêcher l'achat multiple du même template dans une même partie
   const alreadyOwned = await prisma.propertyHolding.findFirst({ where: { gameId, templateId } });
-  if (alreadyOwned) throw new Error("Immeuble déjà acheté dans cette partie");
+  if (alreadyOwned) {
+    // Chercher le propriétaire pour enrichir le message d'erreur
+    const owner = await prisma.player.findUnique({ where: { id: alreadyOwned.playerId }, select: { nickname: true } });
+    const ownerName = owner?.nickname ? owner.nickname : 'un autre joueur';
+    throw new Error(`Immeuble déjà vendu à '${ownerName}'`);
+  }
 
   const [template, player] = await Promise.all([
     prisma.propertyTemplate.findUnique({ where: { id: templateId } }),
