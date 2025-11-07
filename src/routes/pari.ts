@@ -3,6 +3,18 @@ import { z } from "zod";
 import { prisma } from "../prisma";
 import { requireUserOrGuest } from "./auth";
 
+/**
+ * Règles du jeu Pari (dés x3) :
+ * - Triple (ex: 6-6-6)  => multiplicateur = somme des 3 dés (ex: 6+6+6 = 18)
+ *   Justification: gros coup de chance, paiement explosif proportionnel à la valeur.
+ * - Double (ex: 4-4-1)  => multiplicateur = valeur du dé répété (ex: 4)
+ *   (Ancienne règle x2 ou 2×face abandonnée pour lisibilité et variance réduite).
+ * - Suite consécutive (ex: 2-3-4) => multiplicateur = 2 (bonus modéré de skill/chance).
+ * - Autre combinaison => 0 (perte de la mise).
+ *
+ * Le flux: on débite la mise, on calcule outcome, puis on crédite mise × multiplicateur si >0.
+ */
+
 function roll3(): [number, number, number] {
   return [1,2,3].map(() => Math.floor(Math.random()*6)+1) as [number,number,number];
 }

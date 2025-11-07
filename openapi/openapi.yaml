@@ -33,6 +33,36 @@ paths:
       responses:
         '200':
           description: OK
+  /api/games/{gameId}/pari/play:
+    post:
+      summary: Jouer au Pari (lancer 3 dés)
+      description: |
+        Règles du Pari:
+        - Triple (ex: 6-6-6) ⇒ multiplicateur = somme des 3 dés (ex: 18)
+        - Double (ex: 4-4-1) ⇒ multiplicateur = valeur du dé doublé (ex: 4)
+        - Suite consécutive (ex: 2-3-4) ⇒ x2
+        - Autre ⇒ 0 (perdu)
+        Flux: débit de la mise, calcul du gain = mise × multiplicateur, puis crédit si >0.
+      parameters:
+        - in: path
+          name: gameId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bet]
+              properties:
+                bet:
+                  type: integer
+                  minimum: 1
+      responses:
+        '200':
+          description: OK
   /api/games/{id}/join:
     post:
       summary: Rejoindre une partie par ID
@@ -144,6 +174,10 @@ paths:
                   type: number
                 downPaymentPercent:
                   type: number
+                mortgageYears:
+                  type: integer
+                  minimum: 5
+                  maximum: 25
       responses:
         '201':
           description: Created
@@ -173,6 +207,29 @@ paths:
                   type: number
                 cashOutPercent:
                   type: number
+                keepRemainingTerm:
+                  type: boolean
+                newTermYears:
+                  type: integer
+                  minimum: 5
+                  maximum: 25
+      responses:
+        '200':
+          description: OK
+  /api/games/{gameId}/properties/owner/{templateId}:
+    get:
+      summary: Révéler le propriétaire d'un template d'immeuble
+      parameters:
+        - in: path
+          name: gameId
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: templateId
+          required: true
+          schema:
+            type: string
       responses:
         '200':
           description: OK
