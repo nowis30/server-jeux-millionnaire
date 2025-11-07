@@ -117,7 +117,8 @@ export async function registerPropertyRoutes(app: FastifyInstance) {
       playerId: z.string(),
       templateId: z.string(),
       mortgageRate: z.number().min(0).max(0.15).optional(),
-      downPaymentPercent: z.number().min(0).max(1).optional(),
+      // Mise de fonds minimale 20% désormais
+      downPaymentPercent: z.number().min(0.2).max(1).optional(),
       mortgageYears: z.number().min(5).max(25).optional(),
     });
 

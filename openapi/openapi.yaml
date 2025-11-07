@@ -179,6 +179,8 @@ paths:
                   type: number
                 downPaymentPercent:
                   type: number
+                  minimum: 0.2
+                  description: Mise de fonds (entre 20% et 100%). Achat refusé si <20%.
                 mortgageYears:
                   type: integer
                   minimum: 5

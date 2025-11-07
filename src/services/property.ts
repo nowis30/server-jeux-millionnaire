@@ -41,7 +41,7 @@ export async function purchaseProperty({
   if (player.gameId !== gameId) throw new Error("Player n'appartient pas à cette partie");
 
   const price = template.price;
-  const sanitizedPercent = Math.max(0, Math.min(1, downPaymentPercent));
+  const sanitizedPercent = Math.max(0.2, Math.min(1, downPaymentPercent));
   const downPayment = Math.round(price * sanitizedPercent);
   if (player.cash < downPayment) throw new Error("Liquidités insuffisantes");
 
