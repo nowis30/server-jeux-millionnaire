@@ -440,7 +440,7 @@ export async function generateAndSaveQuestions(): Promise<number> {
  * Assure un stock minimum de questions ENFANTS (easy, category kids/enfants), sans images.
  * Utilise le prompt dédié enfants pour plus de qualité.
  */
-export async function ensureKidsPool(minKids = 120, targetKids = 180): Promise<{ created: number; remaining: number; target: number }> {
+export async function ensureKidsPool(minKids = 450, targetKids = 500): Promise<{ created: number; remaining: number; target: number }> {
   // Calculer le stock enfants restant (non utilisés globalement)
   const kidsCategories = ['kids','enfants'] as const;
   const kidsTotal = await prisma.quizQuestion.count({ where: { category: { in: kidsCategories as any }, difficulty: 'easy' } });
@@ -459,11 +459,17 @@ export async function ensureKidsPool(minKids = 120, targetKids = 180): Promise<{
   const toCreate = Math.max(0, targetKids - kidsRemaining);
   let created = 0;
   const batchSize = 12;
+  // Pré-charger les questions enfants existantes pour une déduplication rapide
+  const existingKids = await prisma.quizQuestion.findMany({ where: { category: { in: kidsCategories as any }, difficulty: 'easy' }, select: { question: true } });
+  const existingSet = new Set(existingKids.map(q => q.question.toLowerCase().trim()));
+
   for (let i = 0; i < Math.ceil(toCreate / batchSize); i++) {
     try {
       const raw = await generateKidsQuestionsWithAI(Math.min(batchSize, toCreate - created));
       for (const q0 of raw) {
         try {
+          const key = q0.question.toLowerCase().trim();
+          if (existingSet.has(key)) continue;
           const isDup = await isDuplicate(q0.question);
           if (isDup) continue;
           const shuffled = shuffleAnswers({ ...q0, difficulty: 'easy', category: 'kids' } as any);
@@ -481,6 +487,7 @@ export async function ensureKidsPool(minKids = 120, targetKids = 180): Promise<{
             }
           });
           created++;
+          existingSet.add(key);
         } catch {}
       }
       // petite pause anti rate-limit
