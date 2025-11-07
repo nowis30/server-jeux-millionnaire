@@ -17,15 +17,17 @@ export async function registerGameRoutes(app: FastifyInstance) {
     // Retourner uniquement la partie globale (créer si manquante)
     let g = await prisma.game.findUnique({ where: { code: GLOBAL_CODE }, include: { players: true } });
     if (!g) {
-      g = await prisma.game.create({ data: { code: GLOBAL_CODE, status: "running", startedAt: new Date() }, include: { players: true } });
+      const infl = 0.01 + Math.random() * 0.04; // 1%..5%
+      // Prisma client pas encore régénéré avec les champs inflation -> cast any
+      g = await (prisma as any).game.create({ data: { code: GLOBAL_CODE, status: "running", startedAt: new Date(), inflationAnnual: infl, inflationIndex: 1 }, include: { players: true } });
     }
-    const payload = [{
-      id: g.id,
-      code: g.code,
-      status: g.status,
-      players: g.players.length,
-      createdAt: g.createdAt,
-    }];
+    const payload = g ? [{
+      id: (g as any).id,
+      code: (g as any).code,
+      status: (g as any).status,
+      players: (g as any).players.length,
+      createdAt: (g as any).createdAt,
+    }] : [];
     return reply.send({ games: payload });
   });
 
@@ -43,9 +45,10 @@ export async function registerGameRoutes(app: FastifyInstance) {
     const bodySchema = z.object({ hostNickname: z.string().min(2).optional() });
     const { hostNickname } = bodySchema.parse((req as any).body ?? {});
     const GLOBAL_CODE = process.env.GLOBAL_GAME_CODE || "GLOBAL";
-    let game = await prisma.game.findUnique({ where: { code: GLOBAL_CODE } });
+    let game: any = await prisma.game.findUnique({ where: { code: GLOBAL_CODE } });
     if (!game) {
-      game = await prisma.game.create({ data: { code: GLOBAL_CODE, status: "running", startedAt: new Date() } });
+      const infl = 0.01 + Math.random() * 0.04; // 1%..5%
+      game = await (prisma as any).game.create({ data: { code: GLOBAL_CODE, status: "running", startedAt: new Date(), inflationAnnual: infl, inflationIndex: 1 } });
     } else if (game.status !== "running") {
       game = await prisma.game.update({ where: { id: game.id }, data: { status: "running", startedAt: game.startedAt ?? new Date() } });
     }
@@ -61,7 +64,7 @@ export async function registerGameRoutes(app: FastifyInstance) {
       }
       // vérifier unicité du pseudo
       const trimmed = hostNickname.trim();
-      const dup = await prisma.player.findFirst({ where: { gameId: game.id, nickname: { equals: trimmed, mode: 'insensitive' } }, select: { id: true } });
+  const dup = await prisma.player.findFirst({ where: { gameId: game.id, nickname: { equals: trimmed, mode: 'insensitive' } }, select: { id: true } });
       if (dup) return reply.status(409).send({ error: "Pseudo déjà utilisé dans cette partie" });
       hostPlayer = await prisma.player.upsert({
         where: { gameId_guestId: { gameId: game.id, guestId } },

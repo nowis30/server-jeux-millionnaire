@@ -63,6 +63,9 @@ model Game {
   // Paramètres économiques pilotés par le jeu
   baseMortgageRate   Float   @default(0.05) // 5% au départ, varie de 0.25%/mois entre 2% et 7%
   appreciationAnnual Float   @default(0.03) // 3% par défaut, choisie chaque année entre 2% et 5%
+  // Inflation générale appliquée aux nouveaux prix (1% à 5% l'an) et index cumulatif
+  inflationAnnual    Float   @default(0.02) // choisi au démarrage de la partie (1% à 5%)
+  inflationIndex     Float   @default(1)    // multiplicateur cumulé, part de 1 et augmente chaque "semaine" (tick horaire)
 
   players     Player[]
   marketTicks MarketTick[]

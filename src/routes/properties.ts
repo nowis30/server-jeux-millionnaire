@@ -41,7 +41,15 @@ export async function registerPropertyRoutes(app: FastifyInstance) {
     try {
       const body = typeof (req as any).body === 'string' ? JSON.parse((req as any).body) : ((req as any).body || {});
       const gameId: string | undefined = body?.gameId || (req as any).query?.gameId;
-      const quotas = await ensurePropertyTypeQuotas(5);
+      // Récupérer l'index d'inflation courant (si gameId fourni)
+      let inflationIndex = 1;
+      if (gameId) {
+        try {
+          const g = await (app.prisma as any).game.findUnique({ where: { id: gameId }, select: { inflationIndex: true } });
+          inflationIndex = Number(g?.inflationIndex ?? 1) || 1;
+        } catch {}
+      }
+      const quotas = await ensurePropertyTypeQuotas(5, { priceMultiplier: inflationIndex });
 
       // Compter les templates DISPONIBLES pour ce jeu (non achetés dans cette partie + pas d'anciennes images picsum)
       const excludeOld = { NOT: { imageUrl: { startsWith: "https://picsum.photos" } } } as const;
@@ -59,7 +67,7 @@ export async function registerPropertyRoutes(app: FastifyInstance) {
       if (available < 50) {
         const totalNow = await app.prisma.propertyTemplate.count();
         const needed = 50 - available;
-        created = await seedTemplatesGenerate(totalNow + needed);
+        created = await seedTemplatesGenerate(totalNow + needed, { priceMultiplier: inflationIndex });
         // Recompter après création
         if (gameId) {
           const purchased = await app.prisma.propertyHolding.findMany({ where: { gameId }, select: { templateId: true } });
@@ -70,8 +78,8 @@ export async function registerPropertyRoutes(app: FastifyInstance) {
         }
       }
 
-      const total = await app.prisma.propertyTemplate.count();
-      return reply.send({ ok: true, available, created, total, quotas });
+  const total = await app.prisma.propertyTemplate.count();
+  return reply.send({ ok: true, available, created, total, quotas, inflationIndex });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Erreur de remplissage";
       return reply.status(500).send({ error: message });

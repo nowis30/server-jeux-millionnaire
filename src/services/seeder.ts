@@ -41,6 +41,8 @@ function illustrationForType(t: string): string {
   if (/(quadruplex|4-?plex|fourplex)/i.test(t)) return "/images/props/quadruplex.svg";
   if (/(6-?plex|sixplex|six-?plex)/i.test(t)) return "/images/props/6plex.svg";
   if (/(tour|tower|condo)/i.test(t)) return "/images/props/tower.svg";
+  if (/(gratte-ciel|skyscraper)/i.test(t)) return "/images/props/skyscraper.svg"; // image existante si fournie, sinon retirée côté client
+  if (/(village futuriste|futuriste|village)/i.test(t)) return "/images/village_futuriste.svg";
   if (/(commercial|commerciale)/i.test(t)) return "/images/props/commercial.svg";
   return "/images/props/maison.svg";
 }
@@ -91,7 +93,7 @@ export async function seedTemplatesFromJson(): Promise<number> {
   return created;
 }
 
-export async function seedTemplatesGenerate(minTotal = 50): Promise<number> {
+export async function seedTemplatesGenerate(minTotal = 50, opts?: { priceMultiplier?: number }): Promise<number> {
   const existing = await prisma.propertyTemplate.count();
   const toCreate = Math.max(0, minTotal - existing);
   if (toCreate <= 0) return 0;
@@ -112,7 +114,10 @@ export async function seedTemplatesGenerate(minTotal = 50): Promise<number> {
     const baseRent = clamp(1000 + (i % 10) * 120, 900, 2800);
     const annualGross = baseRent * units * 12;
     const grm = 10 + (i % 5); // 10..14
-    const price = Math.round(annualGross * grm);
+    let price = Math.round(annualGross * grm);
+    if (opts?.priceMultiplier && opts.priceMultiplier > 0) {
+      price = Math.round(price * opts.priceMultiplier);
+    }
     // Dépenses (taxes/assurance/entretien) plausibles
     const taxes = clamp(Math.round(annualGross * 0.10), 1_000, 10_000);
     const insurance = clamp(Math.round(annualGross * 0.04), 300, 4_000);
@@ -156,7 +161,7 @@ export async function seedAll(minTotal = 50) {
 
 // Garantir un minimum par type (par nombre d'unités)
 // Types couverts: 1=Maison, 2=Duplex, 3=Triplex, 6=6-plex, 50=Tour à condos
-export async function ensurePropertyTypeQuotas(minPerType = 5) {
+export async function ensurePropertyTypeQuotas(minPerType = 5, opts?: { priceMultiplier?: number }) {
   const specs: Array<{ label: string; units: number; rentMin: number; rentMax: number }> = [
     { label: "Maison", units: 1, rentMin: 1200, rentMax: 2200 },
     { label: "Duplex", units: 2, rentMin: 950, rentMax: 1500 },
@@ -164,6 +169,7 @@ export async function ensurePropertyTypeQuotas(minPerType = 5) {
     { label: "6-plex", units: 6, rentMin: 800, rentMax: 1200 },
     { label: "Tour à condos (50 log.)", units: 50, rentMin: 1100, rentMax: 1800 },
     { label: "Gratte-ciel (400 log.)", units: 400, rentMin: 850, rentMax: 1300 },
+    { label: "Village futuriste", units: 800, rentMin: 2500, rentMax: 4000 },
   ];
 
   function rand(min: number, max: number) { return Math.random() * (max - min) + min; }
@@ -183,10 +189,18 @@ export async function ensurePropertyTypeQuotas(minPerType = 5) {
     for (let i = 0; i < deficit; i++) {
       const city = cities[(i + created) % cities.length];
       const baseRent = randi(spec.rentMin, spec.rentMax);
-  const annualGross = baseRent * spec.units * 12;
-  // Gratte-ciel: multiplier plus élevé 14-16x comme demandé
-  const grm = spec.units >= 400 ? Math.round(rand(14, 16) * 10) / 10 : Math.round(rand(10, 14) * 10) / 10;
-      const price = Math.round(annualGross * grm);
+      const annualGross = baseRent * spec.units * 12;
+      // Gratte-ciel: 14-16x, Village futuriste: prix fixe 100G$ demandé sinon utiliser 20-25x si besoin
+      let price: number;
+      if (spec.units >= 800) {
+        price = 100_000_000_000; // 100 milliards $
+      } else {
+        const grm = spec.units >= 400 ? Math.round(rand(14, 16) * 10) / 10 : Math.round(rand(10, 14) * 10) / 10;
+        price = Math.round(annualGross * grm);
+      }
+      if (opts?.priceMultiplier && opts.priceMultiplier > 0) {
+        price = Math.round(price * opts.priceMultiplier);
+      }
       const expensesAnnual = Math.round(annualGross * rand(0.25, 0.35));
       const taxes = Math.round(expensesAnnual * 0.4);
       const insurance = Math.round(expensesAnnual * 0.15);
@@ -201,8 +215,8 @@ export async function ensurePropertyTypeQuotas(minPerType = 5) {
         data: {
           name,
           city,
-          imageUrl: spec.units >= 400 ? "/images/props/skyscraper.svg" : imageUrl,
-          description: `${spec.label} à ${city} · ${spec.units} logement(s). Loyer unitaire ≈ ${baseRent}$/mois.` + (spec.units >= 400 ? " Centre commercial inclus." : ""),
+          imageUrl: spec.units >= 800 ? "/images/village_futuriste.svg" : (spec.units >= 400 ? "/images/props/skyscraper.svg" : imageUrl),
+          description: `${spec.label} à ${city} · ${spec.units} logement(s). Loyer unitaire ≈ ${baseRent}$/mois.` + (spec.units >= 400 && spec.units < 800 ? " Centre commercial inclus." : spec.units >= 800 ? " Habitat autonome haute technologie." : ""),
           price,
           baseRent,
           taxes,
@@ -213,7 +227,7 @@ export async function ensurePropertyTypeQuotas(minPerType = 5) {
           electricityState,
           roofState,
           // Champs étages & centre commercial
-          floors: spec.units >= 400 ? 100 : 1,
+          floors: spec.units >= 800 ? 120 : (spec.units >= 400 ? 100 : 1),
           hasCommercialCenter: spec.units >= 400 ? true : false,
         } as any,
       });

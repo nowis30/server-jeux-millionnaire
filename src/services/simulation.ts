@@ -25,6 +25,17 @@ export async function hourlyTick(gameId: string) {
   });
   if (!game) return;
 
+  // --- Inflation hebdomadaire (1 tick = 1 semaine de jeu) ---
+  try {
+    const inflAnnual = Number((game as any).inflationAnnual ?? 0.02); // 2% défaut si non défini
+    const inflIndex = Number((game as any).inflationIndex ?? 1);
+    const weeklyFactor = Math.pow(1 + inflAnnual, 1 / 52); // racine 52 du facteur annuel
+    const newInflIndex = inflIndex * weeklyFactor;
+  await (prisma as any).game.update({ where: { id: gameId }, data: { inflationIndex: newInflIndex } });
+  } catch (err) {
+    // silencieux: l'inflation n'empêche pas le tick
+  }
+
   // Marché: variation des actifs
   for (const symbol of MARKET_ASSETS) {
     const last = await prisma.marketTick.findFirst({

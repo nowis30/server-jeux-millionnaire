@@ -23,7 +23,7 @@ export async function registerEconomyRoutes(app: FastifyInstance) {
   app.get("/api/games/:gameId/economy", async (req, reply) => {
     const paramsSchema = z.object({ gameId: z.string() });
     const { gameId } = paramsSchema.parse((req as any).params);
-    const g = await (app.prisma as any).game.findUnique({ where: { id: gameId }, select: { baseMortgageRate: true, appreciationAnnual: true, startedAt: true } });
+    const g = await (app.prisma as any).game.findUnique({ where: { id: gameId }, select: { baseMortgageRate: true, appreciationAnnual: true, inflationAnnual: true, inflationIndex: true, startedAt: true } });
     if (!g) return reply.status(404).send({ error: "Partie introuvable" });
 
     // Planifier 10 ans d'appréciations futures de manière déterministe à partir du gameId et de l'année courante
@@ -40,6 +40,12 @@ export async function registerEconomyRoutes(app: FastifyInstance) {
         schedule.push(Number(val.toFixed(4)));
       }
     }
-    return reply.send({ baseMortgageRate: Number(g.baseMortgageRate ?? 0.05), appreciationAnnual: Number(g.appreciationAnnual ?? 0.03), schedule });
+    return reply.send({
+      baseMortgageRate: Number(g.baseMortgageRate ?? 0.05),
+      appreciationAnnual: Number(g.appreciationAnnual ?? 0.03),
+      inflationAnnual: Number(g.inflationAnnual ?? 0.02),
+      inflationIndex: Number(g.inflationIndex ?? 1),
+      schedule,
+    });
   });
 }
