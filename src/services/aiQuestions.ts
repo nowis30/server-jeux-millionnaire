@@ -79,14 +79,26 @@ const KIDS_SYSTEM_PROMPT = `Tu es un pédagogue qui crée des questions de quiz 
 Objectifs:
 - Questions TRÈS simples, une seule idée par question
 - Mots courts, phrases courtes, sans jargon
-- Thèmes concrets: animaux, couleurs, formes, objets du quotidien, saisons, jours, chiffres 1–10
 - 4 options claires; une seule est correcte
 - Ton bienveillant, ludique, zéro piège
 
+Thèmes variés (mixe-les au fil des questions):
+- Couleurs (rouge/bleu/vert/jaune, associer objets/couleurs)
+- Nombres 1–10 (compter, comparer, simple addition 1 chiffre)
+- Jours de la semaine (lundi → dimanche), saisons (printemps/été/automne/hiver)
+- Formes (cercle, carré, triangle, rectangle)
+- Météo (pluie, soleil, neige, vent)
+- Animaux familiers (chat, chien, oiseau, poisson) et nature proche
+- Objets du quotidien (pomme, ballon, livre, chaise)
+- Émotions simples (content, triste), routines (matin/soir)
+
 Contraintes:
 - Difficulté: "easy" uniquement
-- Catégorie: "kids"
-- JSON strict au format:
+- Catégorie: "kids" (ou "enfants" acceptable)
+- Pas d'images (laisse imageUrl vide)
+- Français simple et correct
+
+JSON strict au format:
 {
   "questions": [
     {
@@ -102,7 +114,7 @@ Contraintes:
   ]
 }
 
-N'utilise pas d'URL d'image, laisse l'IA serveur gérer les images. Réponds UNIQUEMENT le JSON.`;
+Réponds UNIQUEMENT le JSON, sans aucun texte avant/après.`;
 
 async function generateKidsQuestionsWithAI(count: number = 10): Promise<GeneratedQuestion[]> {
   if (!process.env.OPENAI_API_KEY) {

@@ -288,6 +288,29 @@ export async function registerQuizRoutes(app: FastifyInstance) {
     }
   });
 
+  // GET /api/quiz/ensure-kids - Remplir/assurer le stock de questions enfants (secret requis)
+  app.get("/api/quiz/ensure-kids", async (req, reply) => {
+    try {
+      const querySchema = z.object({
+        secret: z.string().optional(),
+        min: z.coerce.number().optional(),
+        target: z.coerce.number().optional(),
+      });
+      const { secret, min = 450, target = 500 } = querySchema.parse((req as any).query || {});
+
+      const expectedSecret = process.env.QUIZ_GENERATION_SECRET || "generate123";
+      if (secret !== expectedSecret) {
+        return reply.status(401).send({ error: "Secret invalide - ajoutez ?secret=generate123" });
+      }
+
+      const res = await ensureKidsPool(min, target);
+      return reply.send({ success: true, ...res });
+    } catch (err: any) {
+      app.log.error({ err }, "Erreur ensure-kids");
+      return reply.status(500).send({ error: err.message });
+    }
+  });
+
   // POST /api/games/:gameId/quiz/skip - Passer la question actuelle (max 3 fois)
   app.post("/api/games/:gameId/quiz/skip", { preHandler: requireUserOrGuest(app) }, async (req, reply) => {
     const paramsSchema = z.object({ gameId: z.string() });
@@ -509,8 +532,8 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         throw err;
       }
 
-  // S'assurer d'un stock suffisant de questions enfants (sans images)
-  try { await ensureKidsPool(450, 500); } catch {}
+  // S'assurer d'un stock suffisant de questions enfants (sans images) — en arrière-plan pour ne pas bloquer
+  try { ensureKidsPool(450, 500).catch(() => {}); } catch {}
   // Sélection enfant (easy) classique
   const question = await selectKidFriendlyQuestion(player.id, session.id);
 
@@ -588,7 +611,7 @@ export async function registerQuizRoutes(app: FastifyInstance) {
 
     // Sélectionner une question non vue (enfant si Q<=4)
     if (activeSession.currentQuestion <= 4) {
-      try { await ensureKidsPool(450, 500); } catch {}
+      try { ensureKidsPool(450, 500).catch(() => {}); } catch {}
     }
     const question = activeSession.currentQuestion <= 4
       ? await selectKidFriendlyQuestion(player.id, activeSession.id)
@@ -737,7 +760,7 @@ export async function registerQuizRoutes(app: FastifyInstance) {
   // Récupérer la prochaine question (non vue) - enfant si Q<=4
   const nextDifficulty = getDifficultyForQuestion(session.currentQuestion + 1);
   if ((session.currentQuestion + 1) <= 4) {
-    try { await ensureKidsPool(450, 500); } catch {}
+    try { ensureKidsPool(450, 500).catch(() => {}); } catch {}
   }
   const nextQuestion = (session.currentQuestion + 1) <= 4
     ? await selectKidFriendlyQuestion(session.player.id, session.id)

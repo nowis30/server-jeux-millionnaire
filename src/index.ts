@@ -24,7 +24,7 @@ import { registerEconomyRoutes } from "./routes/economy";
 import { cleanupMarketTicks } from "./services/tickCleanup";
 import { registerQuizRoutes } from "./routes/quiz";
 import { registerReferralRoutes } from "./routes/referrals";
-import { generateAndSaveQuestions, replenishIfLow, maintainQuestionStock } from "./services/aiQuestions";
+import { generateAndSaveQuestions, replenishIfLow, maintainQuestionStock, ensureKidsPool } from "./services/aiQuestions";
 import { ensurePropertyTypeQuotas } from "./services/seeder";
 
 async function bootstrap() {
@@ -318,6 +318,20 @@ async function bootstrap() {
     app.log.info("[cron] nightlyRefresh");
     const games = await prisma.game.findMany({ where: { status: "running" } }).catch(() => []);
     for (const g of games) await nightlyRefresh(g.id);
+  }, { timezone: env.TIMEZONE });
+
+  // Quiz enfants: top-up nocturne dédié (03:10) pour garantir un stock de 500 faciles sans doublons
+  cron.schedule("10 3 * * *", async () => {
+    try {
+      const res = await ensureKidsPool(480, 500);
+      if (res.created > 0) {
+        app.log.info({ remainingBefore: res.remaining, created: res.created, target: res.target }, "[cron] Kids: pool complété vers 500");
+      } else {
+        app.log.info({ remaining: res.remaining }, "[cron] Kids: pool OK (≥480)");
+      }
+    } catch (err: any) {
+      app.log.warn({ err: err?.message || err }, "[cron] Kids ensureKidsPool a échoué");
+    }
   }, { timezone: env.TIMEZONE });
 
   // Taux hypothécaires variables: le 1er de chaque mois, ajuster de +/-0.25% dans [2%,7%]
