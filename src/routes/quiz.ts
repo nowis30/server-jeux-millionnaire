@@ -14,8 +14,9 @@ import {
 const BASE_STAKE = 5000;
 const getPrizeAmount = (questionNumber: number) => BASE_STAKE * Math.pow(2, Math.max(0, questionNumber - 1));
 const getDifficultyForQuestion = (questionNumber: number): 'easy' | 'medium' | 'hard' => {
-  if (questionNumber <= 5) return 'easy';
-  if (questionNumber <= 10) return 'medium';
+  // Ordre demandé: 1-4 facile, 5-7 moyen, 8-10 difficile
+  if (questionNumber <= 4) return 'easy';
+  if (questionNumber <= 7) return 'medium';
   return 'hard';
 };
 

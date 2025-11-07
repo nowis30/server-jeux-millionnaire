@@ -188,7 +188,7 @@ export async function ensureMarketHistory(gameId: string, years = 50) {
       remaining -= len;
     }
 
-    const rows: { gameId: string; symbol: MarketSymbol; price: number; at: Date }[] = [];
+  const rows: { gameId: string; symbol: MarketSymbol; price: number; at: Date }[] = [];
     let price = startPrice;
     // Commence il y a `years` ans et avance jusqu’à aujourd’hui
     const start = new Date();
@@ -213,6 +213,30 @@ export async function ensureMarketHistory(gameId: string, years = 50) {
         inRegime = 0;
       }
       t.setUTCDate(t.getUTCDate() + 1);
+    }
+
+    // Appliquer un plancher de rendement (CAGR min) sur la période générée
+    function minCagrFloor(sym: MarketSymbol): number {
+      switch (sym) {
+        case "SP500": return 0.06; // ≥ 6%/an
+        case "QQQ": return 0.08; // ≥ 8%/an
+        case "TSX": return 0.05; // ≥ 5%/an
+        case "GLD": return 0.02; // ≥ 2%/an
+        case "TLT": return 0.02; // ≥ 2%/an
+        default: return 0.04; // par défaut ≥4%
+      }
+    }
+    if (rows.length > 1) {
+      const first = rows[0].price;
+      const last = rows[rows.length - 1].price;
+      const yrs = Math.max(1, years);
+      const cagr = Math.pow(Math.max(1e-6, last / Math.max(1e-6, first)), 1 / yrs) - 1;
+      const floor = minCagrFloor(symbol as MarketSymbol);
+      if (cagr < floor) {
+        const targetFinal = first * Math.pow(1 + floor, yrs);
+        const scale = targetFinal / Math.max(1e-6, last);
+        for (const r of rows) r.price = Number(Math.max(0.01, r.price * scale).toFixed(2));
+      }
     }
 
     // Insert en batch par tranches (évite dépasser limites)

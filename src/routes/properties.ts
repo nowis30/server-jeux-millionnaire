@@ -1,6 +1,7 @@
 import { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { purchaseProperty, refinanceProperty, sellProperty } from "../services/property";
+import { ensurePropertyTypeQuotas, seedTemplatesGenerate } from "../services/seeder";
 import { assertGameRunning } from "./util";
 
 export async function registerPropertyRoutes(app: FastifyInstance) {
@@ -31,6 +32,25 @@ export async function registerPropertyRoutes(app: FastifyInstance) {
       : (excludeOld as any);
     const templates = await app.prisma.propertyTemplate.findMany({ where, orderBy: { price: "asc" } });
     return reply.send({ templates });
+  });
+
+  // Remplir/compléter la banque d'immeubles manuellement (bouton client)
+  // - Garantit au moins 5 par type (Maison/Duplex/Triplex/6-plex/Tour)
+  // - Et un total minimal de 50 templates au global
+  app.post("/api/properties/replenish", async (req, reply) => {
+    try {
+      const quotas = await ensurePropertyTypeQuotas(5);
+      const before = await app.prisma.propertyTemplate.count();
+      let created = 0;
+      if (before < 50) {
+        created = await seedTemplatesGenerate(50);
+      }
+      const total = await app.prisma.propertyTemplate.count();
+      return reply.send({ ok: true, before, created, total, quotas });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Erreur de remplissage";
+      return reply.status(500).send({ error: message });
+    }
   });
 
   // Liste des biens (holdings) d'un joueur dans une partie

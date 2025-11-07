@@ -508,7 +508,9 @@ export async function maintainQuestionStock(min = 300, target = 400): Promise<{ 
  * Rotation des questions : supprime les plus anciennes si trop nombreuses
  */
 async function rotateQuestions() {
-  const MAX_PER_DIFFICULTY = 50; // Max 50 questions par niveau
+  // Pour maintenir une banque importante (≥1000) on relève fortement le plafond.
+  // Ce plafond évite seulement une dérive infinie si des générations massives sont lancées.
+  const MAX_PER_DIFFICULTY = 5000; // Permet jusqu'à 15 000 questions au total (3 niveaux)
 
   for (const difficulty of ['easy', 'medium', 'hard']) {
     const count = await prisma.quizQuestion.count({ where: { difficulty } });
