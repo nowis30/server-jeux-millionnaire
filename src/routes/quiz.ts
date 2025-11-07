@@ -186,7 +186,8 @@ async function selectKidFriendlyQuestion(playerId: string, sessionId?: string): 
 // Sélection préférentielle pour Q5–Q7: catégories "definitions" et "quebec" (difficulté medium)
 async function selectMediumPreferred(playerId: string, sessionId?: string): Promise<any> {
   const difficulty = 'medium';
-  const preferredCats = ['definitions', 'quebec'];
+  // Ajout religions comme catégorie prioritaire pour Q5–Q7
+  const preferredCats = ['definitions', 'quebec', 'religions'];
 
   for (const category of preferredCats) {
     const totalCat = await prisma.quizQuestion.count({ where: { difficulty, category } });

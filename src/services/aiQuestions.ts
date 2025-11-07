@@ -13,7 +13,7 @@ interface GeneratedQuestion {
   optionD: string;
   correctAnswer: 'A' | 'B' | 'C' | 'D';
   difficulty: 'easy' | 'medium' | 'hard';
-  category: 'finance' | 'economy' | 'real-estate' | 'business' | 'technology' | 'science' | 'history' | 'geography' | 'sports' | 'arts' | 'cinema' | 'music' | 'literature' | 'culture' | 'nature' | 'health' | 'food' | 'general' | 'animals' | 'translation' | 'kids' | 'enfants' | 'quebec' | 'definitions';
+  category: 'finance' | 'economy' | 'real-estate' | 'business' | 'technology' | 'science' | 'history' | 'geography' | 'sports' | 'arts' | 'cinema' | 'music' | 'literature' | 'culture' | 'nature' | 'health' | 'food' | 'general' | 'animals' | 'translation' | 'kids' | 'enfants' | 'quebec' | 'definitions' | 'religions';
   imageUrl?: string; // URL optionnelle d'une image illustrant la question
 }
 
@@ -91,10 +91,13 @@ Thèmes variés (mixe-les au fil des questions):
 - Animaux familiers (chat, chien, oiseau, poisson) et nature proche
 - Objets du quotidien (pomme, ballon, livre, chaise)
 - Émotions simples (content, triste), routines (matin/soir)
+// Ouverture thématique adaptée :
+- Culture québécoise très simple (poutine, hiver, drapeau du Québec, sirop d'érable)
+- Fêtes et religions présentées factuellement et simplement (Noël, Hanoukka, Ramadan, Pâques)
 
 Contraintes:
 - Difficulté: "easy" uniquement
-- Catégorie: "kids" (ou "enfants" acceptable)
+- Catégorie: "kids" (ou "enfants" acceptable) — même si le thème est Québec ou religions, reste dans cette catégorie
 - Pas d'images (laisse imageUrl vide)
 - Français simple et correct
 
@@ -155,7 +158,7 @@ const difficultyPrompts = {
 };
 
 export const allowedCategories = [
-  'finance','economy','real-estate','business','technology','science','history','geography','sports','arts','cinema','music','literature','culture','nature','health','food','general','animals','translation','kids','enfants','quebec','definitions'
+  'finance','economy','real-estate','business','technology','science','history','geography','sports','arts','cinema','music','literature','culture','nature','health','food','general','animals','translation','kids','enfants','quebec','definitions','religions'
 ] as const;
 
 const categoryPrompts = {
@@ -182,7 +185,8 @@ const categoryPrompts = {
   kids: "Questions pour enfants très simples: objets du quotidien, animaux familiers, couleurs, chiffres 1-10",
   enfants: "Questions très faciles (6-9 ans): vocabulaire simple, monde concret, réponses évidentes",
   quebec: "Culture québécoise et canadienne-française: expressions, traditions, géographie locale (provinces/villes), sport (Canadiens de Montréal), histoire (Nouvelle-France), gastronomie (poutine, sirop d'érable)",
-  definitions: "Définitions de mots en français (niveau intermédiaire): synonymes, antonymes, sens le plus juste, choix du bon terme dans un contexte"
+  definitions: "Définitions de mots en français (niveau intermédiaire): synonymes, antonymes, sens le plus juste, choix du bon terme dans un contexte",
+  religions: "Religions du monde (faits neutres): principales croyances, lieux de culte, fêtes majeures, figures fondatrices, répartition géographique. Évite tout jugement ou controverse, reste factuel."
 };
 
 /**
@@ -358,9 +362,10 @@ export async function generateAndSaveQuestions(): Promise<number> {
       { difficulty: 'easy' as const, category: 'culture' as const, count: 2 },
       
       // Questions moyennes (35 questions) - Connaissances intermédiaires
-  // Ajout de thèmes ciblés pour Q5-Q7: définitions de mots et culture québécoise
-  { difficulty: 'medium' as const, category: 'definitions' as const, count: 4 },
-  { difficulty: 'medium' as const, category: 'quebec' as const, count: 4 },
+      // Ajout de thèmes ciblés pour Q5-Q7: définitions de mots, culture québécoise et religions
+      { difficulty: 'medium' as const, category: 'definitions' as const, count: 4 },
+      { difficulty: 'medium' as const, category: 'quebec' as const, count: 4 },
+      { difficulty: 'medium' as const, category: 'religions' as const, count: 4 },
       { difficulty: 'medium' as const, category: 'history' as const, count: 4 },
       { difficulty: 'medium' as const, category: 'science' as const, count: 4 },
       { difficulty: 'medium' as const, category: 'literature' as const, count: 3 },
@@ -521,7 +526,7 @@ export async function ensureKidsPool(minKids = 450, targetKids = 500): Promise<{
  * Ne génère que des questions medium dans ces catégories, sans doublons.
  */
 export async function ensureMediumPool(minMedium = 450, targetMedium = 500): Promise<{ created: number; remaining: number; target: number }> {
-  const mediumCats = ['definitions','quebec'] as const;
+  const mediumCats = ['definitions','quebec','religions'] as const;
   // Compter total et utilisées (distinct attempts) pour ces catégories difficulté medium
   const mediumTotal = await prisma.quizQuestion.count({ where: { category: { in: mediumCats as any }, difficulty: 'medium' } });
   const mediumUsed = await prisma.quizAttempt.findMany({ where: { question: { category: { in: mediumCats as any }, difficulty: 'medium' } }, distinct: ['questionId'], select: { questionId: true } }).then(r => r.length);
