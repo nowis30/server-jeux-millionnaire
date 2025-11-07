@@ -437,6 +437,61 @@ export async function generateAndSaveQuestions(): Promise<number> {
 }
 
 /**
+ * Assure un stock minimum de questions ENFANTS (easy, category kids/enfants), sans images.
+ * Utilise le prompt dédié enfants pour plus de qualité.
+ */
+export async function ensureKidsPool(minKids = 120, targetKids = 180): Promise<{ created: number; remaining: number; target: number }> {
+  // Calculer le stock enfants restant (non utilisés globalement)
+  const kidsCategories = ['kids','enfants'] as const;
+  const kidsTotal = await prisma.quizQuestion.count({ where: { category: { in: kidsCategories as any }, difficulty: 'easy' } });
+  const kidsUsed = await prisma.quizAttempt.findMany({ where: { question: { category: { in: kidsCategories as any }, difficulty: 'easy' } }, distinct: ["questionId"], select: { questionId: true } }).then(r => r.length);
+  const kidsRemaining = Math.max(0, kidsTotal - kidsUsed);
+
+  if (!process.env.OPENAI_API_KEY) {
+    console.warn("[AI] OPENAI_API_KEY manquante – ensureKidsPool ne peut pas générer");
+    return { created: 0, remaining: kidsRemaining, target: targetKids };
+  }
+
+  if (kidsRemaining >= minKids) {
+    return { created: 0, remaining: kidsRemaining, target: targetKids };
+  }
+
+  const toCreate = Math.max(0, targetKids - kidsRemaining);
+  let created = 0;
+  const batchSize = 12;
+  for (let i = 0; i < Math.ceil(toCreate / batchSize); i++) {
+    try {
+      const raw = await generateKidsQuestionsWithAI(Math.min(batchSize, toCreate - created));
+      for (const q0 of raw) {
+        try {
+          const isDup = await isDuplicate(q0.question);
+          if (isDup) continue;
+          const shuffled = shuffleAnswers({ ...q0, difficulty: 'easy', category: 'kids' } as any);
+          await prisma.quizQuestion.create({
+            data: {
+              question: shuffled.question,
+              optionA: shuffled.optionA,
+              optionB: shuffled.optionB,
+              optionC: shuffled.optionC,
+              optionD: shuffled.optionD,
+              correctAnswer: shuffled.correctAnswer,
+              difficulty: 'easy',
+              category: 'kids',
+              imageUrl: null,
+            }
+          });
+          created++;
+        } catch {}
+      }
+      // petite pause anti rate-limit
+      await new Promise(r => setTimeout(r, 400));
+    } catch {}
+  }
+
+  return { created, remaining: kidsRemaining + created, target: targetKids };
+}
+
+/**
  * Génère 20 questions par catégorie (réparties 7 easy, 7 medium, 6 hard)
  */
 export async function generateTwentyPerCategory(): Promise<number> {
