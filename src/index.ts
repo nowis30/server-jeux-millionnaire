@@ -23,6 +23,7 @@ import { computeWeeklyMortgage } from "./services/simulation";
 import { registerEconomyRoutes } from "./routes/economy";
 import { cleanupMarketTicks } from "./services/tickCleanup";
 import { registerQuizRoutes } from "./routes/quiz";
+import { registerPariRoutes } from "./routes/pari";
 import { registerReferralRoutes } from "./routes/referrals";
 import { generateAndSaveQuestions, replenishIfLow, maintainQuestionStock, ensureKidsPool, ensureMediumPool } from "./services/aiQuestions";
 import { ensurePropertyTypeQuotas } from "./services/seeder";
@@ -177,6 +178,7 @@ async function bootstrap() {
   await registerAuthRoutes(app);
   await registerEconomyRoutes(app);
   await registerQuizRoutes(app);
+  await registerPariRoutes(app);
   await registerReferralRoutes(app);
   try {
     await registerDocs(app);
