@@ -43,6 +43,7 @@ paths:
         - Suite consécutive (ex: 2-3-4) ⇒ x2
         - Autre ⇒ 0 (perdu)
         Flux: débit de la mise, calcul du gain = mise × multiplicateur, puis crédit si >0.
+        Plafond dynamique: la mise ne peut pas dépasser 50% du cash actuel du joueur, plafonné à 1,000,000,000. Erreur 400 si dépassement.
       parameters:
         - in: path
           name: gameId
@@ -60,7 +61,10 @@ paths:
                 bet:
                   type: integer
                   minimum: 1
-                  maximum: 1000000000
+                  description: |
+                    Mise en monnaie du jeu.
+                    Plafond dynamique appliqué côté serveur: max = min(50% du cash joueur, 1,000,000,000).
+                    Erreur 400 si la mise dépasse ce plafond ou est < 5,000.
       responses:
         '200':
           description: OK
