@@ -4,6 +4,7 @@ import { purchaseProperty, refinanceProperty, sellProperty } from "../services/p
 import { ensurePropertyTypeQuotas, seedTemplatesGenerate } from "../services/seeder";
 import { assertGameRunning } from "./util";
 import { requireUserOrGuest } from "./auth";
+import { requireAdmin } from "./auth";
 
 export async function registerPropertyRoutes(app: FastifyInstance) {
   app.get("/api/properties/templates", async (req, reply) => {
@@ -292,8 +293,8 @@ export async function registerPropertyRoutes(app: FastifyInstance) {
       playerId: z.string(),
       templateId: z.string(),
       mortgageRate: z.number().min(0).max(0.15).optional(),
-      // Mise de fonds minimale 20% désormais
-      downPaymentPercent: z.number().min(0.2).max(1).optional(),
+      // Mise de fonds: accepte 0.2–1.0 (fraction) ou 20–100 (pourcentage)
+      downPaymentPercent: z.coerce.number().min(0.2).max(100).optional(),
       mortgageYears: z.number().min(5).max(25).optional(),
     });
 
@@ -301,7 +302,18 @@ export async function registerPropertyRoutes(app: FastifyInstance) {
   const params = paramsSchema.parse((req as any).params);
   await assertGameRunning(app, params.gameId);
       const body = bodySchema.parse((req as any).body);
-  const holding = await purchaseProperty({ gameId: params.gameId, ...body });
+      // Normaliser la mise de fonds: si >1 on considère que c'est un pourcentage (ex: 50) => 0.5
+      const normalizedDown = body.downPaymentPercent != null
+        ? (body.downPaymentPercent > 1 ? body.downPaymentPercent / 100 : body.downPaymentPercent)
+        : undefined;
+      const holding = await purchaseProperty({
+        gameId: params.gameId,
+        playerId: body.playerId,
+        templateId: body.templateId,
+        mortgageRate: body.mortgageRate,
+        downPaymentPercent: normalizedDown,
+        mortgageYears: body.mortgageYears,
+      });
       // Emit event feed
       (app as any).io?.to(`game:${params.gameId}`).emit("event-feed", {
         type: "property:purchase",
@@ -364,6 +376,45 @@ export async function registerPropertyRoutes(app: FastifyInstance) {
     } catch (err) {
       const message = err instanceof Error ? err.message : "Erreur de vente";
       return reply.status(400).send({ error: message });
+    }
+  });
+
+  // POST /api/games/:gameId/properties/backfill-rent-by-units (admin):
+  // Corrige currentRent = template.baseRent * template.units pour les holdings existants
+  app.post("/api/games/:gameId/properties/backfill-rent-by-units", { preHandler: requireAdmin(app) }, async (req, reply) => {
+    const paramsSchema = z.object({ gameId: z.string() });
+    const { gameId } = paramsSchema.parse((req as any).params);
+    try {
+      const holdings = await app.prisma.propertyHolding.findMany({ where: { gameId }, include: { template: true } });
+      let updated = 0;
+      const errors: { id: string; reason: string }[] = [];
+      for (const h of holdings) {
+        try {
+          const t = h.template;
+          if (!t) {
+            errors.push({ id: h.id, reason: "template_missing" });
+            continue;
+          }
+          const units = Number((t as any)?.units ?? 1) || 1;
+          const baseRent = Number(t.baseRent ?? 0) || 0;
+          if (baseRent <= 0) continue; // rien à corriger
+          const expected = Math.round(baseRent * Math.max(1, units));
+          // Cas à corriger: currentRent absent ou équivalent au baseRent alors que units >1
+          const currentRounded = Math.round(Number(h.currentRent ?? 0));
+          const isApproxBase = Math.abs(currentRounded - Math.round(baseRent)) <= 1;
+          const needsFix = units > 1 && expected !== currentRounded && (currentRounded === 0 || isApproxBase);
+          if (needsFix) {
+            await app.prisma.propertyHolding.update({ where: { id: h.id }, data: { currentRent: expected } });
+            updated++;
+          }
+        } catch (e: any) {
+          errors.push({ id: h.id, reason: e?.message || "update_failed" });
+        }
+      }
+      return reply.send({ ok: true, updated, total: holdings.length, errors });
+    } catch (err: any) {
+      const message = err instanceof Error ? err.message : "Erreur backfill";
+      return reply.status(500).send({ ok: false, error: message });
     }
   });
 }
