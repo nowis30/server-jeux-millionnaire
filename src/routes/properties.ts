@@ -1,7 +1,7 @@
 import { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { purchaseProperty, refinanceProperty, sellProperty } from "../services/property";
-import { ensurePropertyTypeQuotas, seedTemplatesGenerate } from "../services/seeder";
+import { ensurePropertyTypeQuotas, ensureExactTypeCounts, seedTemplatesGenerate } from "../services/seeder";
 import { assertGameRunning } from "./util";
 import { requireUserOrGuest } from "./auth";
 import { requireAdmin } from "./auth";
@@ -52,6 +52,14 @@ export async function registerPropertyRoutes(app: FastifyInstance) {
         } catch {}
       }
       const quotas = await ensurePropertyTypeQuotas(5, { priceMultiplier: inflationIndex });
+      // Ensurer explicitement 10 six-plex (units=6) si quota général n'a pas suffi
+      const sixplexCount = await app.prisma.propertyTemplate.count({ where: { units: 6 } });
+      let sixplexCreated = 0;
+      if (sixplexCount < 10) {
+        const targets: Record<number, number> = { 6: 10 };
+        const exact = await ensureExactTypeCounts(targets);
+        sixplexCreated = exact["6-plex(6)"]?.created || 0;
+      }
 
       // Compter les templates DISPONIBLES pour ce jeu (non achetés dans cette partie + pas d'anciennes images picsum)
       const excludeOld = { NOT: { imageUrl: { startsWith: "https://picsum.photos" } } } as const;
@@ -81,7 +89,7 @@ export async function registerPropertyRoutes(app: FastifyInstance) {
       }
 
   const total = await app.prisma.propertyTemplate.count();
-  return reply.send({ ok: true, available, created, total, quotas, inflationIndex });
+  return reply.send({ ok: true, available, created, total, quotas, inflationIndex, sixplexCreated });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Erreur de remplissage";
       return reply.status(500).send({ error: message });
