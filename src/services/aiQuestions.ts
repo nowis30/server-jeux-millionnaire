@@ -516,20 +516,20 @@ export async function generateAndSaveQuestions(): Promise<number> {
   { difficulty: 'medium' as const, category: 'animals' as const, count: 2 },
   { difficulty: 'medium' as const, category: 'translation' as const, count: 2 },
       
-      // Questions difficiles (25 questions) - Expertise requise
+      // Questions difficiles (accent IQ/Logique pour Q6–Q10)
       { difficulty: 'hard' as const, category: 'science' as const, count: 4 },
       { difficulty: 'hard' as const, category: 'history' as const, count: 3 },
       { difficulty: 'hard' as const, category: 'literature' as const, count: 3 },
       { difficulty: 'hard' as const, category: 'technology' as const, count: 2 },
-      { difficulty: 'hard' as const, category: 'arts' as const, count: 2 },
-      { difficulty: 'hard' as const, category: 'finance' as const, count: 2 },
-      { difficulty: 'hard' as const, category: 'real-estate' as const, count: 2 },
-      { difficulty: 'hard' as const, category: 'business' as const, count: 2 },
-      { difficulty: 'hard' as const, category: 'geography' as const, count: 2 },
-      { difficulty: 'hard' as const, category: 'economy' as const, count: 2 },
+      { difficulty: 'hard' as const, category: 'arts' as const, count: 1 },
+      { difficulty: 'hard' as const, category: 'finance' as const, count: 1 },
+      { difficulty: 'hard' as const, category: 'real-estate' as const, count: 1 },
+      { difficulty: 'hard' as const, category: 'business' as const, count: 1 },
+      { difficulty: 'hard' as const, category: 'geography' as const, count: 1 },
+      { difficulty: 'hard' as const, category: 'economy' as const, count: 1 },
       { difficulty: 'hard' as const, category: 'health' as const, count: 1 },
-      { difficulty: 'hard' as const, category: 'logic' as const, count: 2 },
-      { difficulty: 'hard' as const, category: 'iq' as const, count: 2 },
+      { difficulty: 'hard' as const, category: 'logic' as const, count: 6 },
+      { difficulty: 'hard' as const, category: 'iq' as const, count: 6 },
     ];
 
     let totalCreated = 0;
@@ -958,6 +958,66 @@ export async function ensureLogicPool(minLogic = 120, targetLogic = 160): Promis
   }
   return { created, remaining: logicRemaining + created, target: targetLogic };
 }
+
+/**
+ * Assure un stock minimum de questions DIFFICILES (hard) pour IQ/LOGIC
+ * Conçu pour alimenter les questions Q6–Q10 en priorité.
+ */
+// (Obsolète) Ancien maintien d'un pool dédié 'hard' logic/iq — conservé COMMENTÉ pour historique.
+/*
+export async function ensureHardLogicPool(minHard = 240, targetHard = 300): Promise<{ created: number; remaining: number; target: number }> {
+  const logicCats = ['logic','iq'] as const;
+  const hardTotal = await prisma.quizQuestion.count({ where: { difficulty: 'hard', category: { in: logicCats as any } } });
+  const hardUsed = await prisma.quizAttempt.findMany({ where: { question: { difficulty: 'hard', category: { in: logicCats as any } } }, distinct: ["questionId"], select: { questionId: true } }).then((r: Array<{ questionId: string }>) => r.length);
+  const hardRemaining = Math.max(0, hardTotal - hardUsed);
+
+  if (hardRemaining >= minHard) {
+    return { created: 0, remaining: hardRemaining, target: targetHard };
+  }
+
+  const toCreate = Math.max(0, targetHard - hardRemaining);
+  let created = 0;
+
+  // Si pas de clé OpenAI, recycler des questions statiques en les marquant hard si possible
+  if (!process.env.OPENAI_API_KEY) {
+    for (const base of STATIC_LOGIC_QUESTIONS) {
+      if (created >= toCreate) break;
+      const q = { ...base, difficulty: 'hard' as const };
+      if (await isDuplicate(q.question)) continue;
+      const shuffled = shuffleAnswers(q as any);
+      await prisma.quizQuestion.create({
+        data: { question: shuffled.question, optionA: shuffled.optionA, optionB: shuffled.optionB, optionC: shuffled.optionC, optionD: shuffled.optionD, correctAnswer: shuffled.correctAnswer, difficulty: 'hard', category: q.category, imageUrl: null }
+      });
+      created++;
+    }
+    return { created, remaining: hardRemaining + created, target: targetHard };
+  }
+
+  const batchSize = 10;
+  for (let i = 0; i < Math.ceil(toCreate / batchSize); i++) {
+    for (const cat of logicCats) {
+      if (created >= toCreate) break;
+      try {
+        const raw = await generateQuestionsWithAI('hard', cat as any, Math.min(batchSize, toCreate - created));
+        for (const q0 of raw) {
+          try {
+            if (q0.difficulty !== 'hard') continue;
+            if (await isDuplicate(q0.question)) continue;
+            const shuffled = shuffleAnswers({ ...q0, difficulty: 'hard', category: cat } as any);
+            await prisma.quizQuestion.create({
+              data: { question: shuffled.question, optionA: shuffled.optionA, optionB: shuffled.optionB, optionC: shuffled.optionC, optionD: shuffled.optionD, correctAnswer: shuffled.correctAnswer, difficulty: 'hard', category: cat, imageUrl: null }
+            });
+            created++;
+          } catch {}
+        }
+        await new Promise(r => setTimeout(r, 400));
+      } catch {}
+    }
+  }
+
+  return { created, remaining: hardRemaining + created, target: targetHard };
+}
+*/
 
 /**
  * Rotation des questions : supprime les plus anciennes si trop nombreuses

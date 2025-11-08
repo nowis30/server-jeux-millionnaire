@@ -355,6 +355,7 @@ async function bootstrap() {
     }
   }, { timezone: env.TIMEZONE });
 
+
   // Taux hypothécaires variables: le 1er de chaque mois, ajuster de +/-0.25% dans [2%,7%]
   cron.schedule("0 1 0 1 * *", async () => {
     app.log.info("[cron] monthly rate step +/-0.25% et MAJ paiements hypothécaires");

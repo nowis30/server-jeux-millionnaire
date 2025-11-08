@@ -14,9 +14,9 @@ import {
 const BASE_STAKE = 50000;
 const getPrizeAmount = (questionNumber: number) => BASE_STAKE * Math.pow(2, Math.max(0, questionNumber - 1));
 const getDifficultyForQuestion = (questionNumber: number): 'easy' | 'medium' | 'hard' => {
-  // Ordre demandé: 1-4 facile, 5-7 moyen, 8-10 difficile
-  if (questionNumber <= 4) return 'easy';
-  if (questionNumber <= 7) return 'medium';
+  // Nouvelle répartition: 1-2 facile (enfants), 3-5 moyen (tous sujets), 6-10 difficile (tous sujets)
+  if (questionNumber <= 2) return 'easy';
+  if (questionNumber <= 5) return 'medium';
   return 'hard';
 };
 
@@ -32,7 +32,7 @@ function shuffle<T>(arr: T[]): T[] {
 const COOLDOWN_MINUTES = 60;
 const MAX_QUESTIONS = 10;
 
-// Images enfant pour les 4 premières questions (thèmes simples, pédagogiques)
+// Images enfant pour les 2 premières questions (thèmes simples, pédagogiques)
 // Ancienne configuration d'images enfants désactivée
 const CHILD_FRIENDLY_IMAGES: Record<number, string> = {};
 
@@ -89,7 +89,6 @@ async function getRecentSessionQuestions(sessionId: string, limit = 5): Promise<
   });
   return attempts.map((a: { question: { id: string; question: string } }) => ({ id: a.question.id, question: a.question.question }));
 }
-
 async function selectUnseenQuestion(playerId: string, difficulty: string, sessionId?: string): Promise<any> {
   // Compter toutes les questions pour cette difficulté (toutes catégories confondues)
   const totalCountAll = await prisma.quizQuestion.count({ where: { difficulty } });
@@ -200,7 +199,7 @@ async function selectUnseenQuestion(playerId: string, difficulty: string, sessio
   return null;
 }
 
-// Sélection dédiée pour premières questions enfant (Q1-Q4)
+// Sélection dédiée pour premières questions enfant (Q1-Q2)
 async function selectKidFriendlyQuestion(playerId: string, sessionId?: string): Promise<any> {
   const difficulty = 'easy';
   const preferredCats = ['kids', 'enfants', 'enfant'];
@@ -240,26 +239,9 @@ async function selectKidFriendlyQuestion(playerId: string, sessionId?: string): 
   return scored[0]?.c || candidates[0];
 }
 
-// Sélection préférentielle pour Q5–Q7: catégories "definitions" et "quebec" (difficulté medium)
-async function selectMediumPreferred(playerId: string, sessionId?: string): Promise<any> {
-  const difficulty = 'medium';
-  // Ajout religions comme catégorie prioritaire pour Q5–Q7
-  const preferredCats = ['definitions', 'quebec', 'religions'];
-
-  for (const category of preferredCats) {
-    const totalCat = await prisma.quizQuestion.count({ where: { difficulty, category } });
-    if (totalCat === 0) continue;
-    const seenCat = await prisma.quizQuestionSeen.findMany({ where: { playerId, question: { difficulty, category } }, select: { questionId: true } });
-  const seenIds = seenCat.map((s: { questionId: string }) => s.questionId);
-    const remaining = totalCat - seenIds.length;
-    if (remaining <= 0) continue;
-    const skip = Math.floor(Math.random() * remaining);
-    const q = await prisma.quizQuestion.findFirst({ where: { difficulty, category, id: { notIn: seenIds } }, skip });
-    if (q) return q;
-  }
-
-  // Fallback vers sélection standard non vue (toutes catégories medium)
-  return await selectUnseenQuestion(playerId, difficulty, sessionId);
+// Sélection difficile générique (Q6–Q10) sur toutes catégories hard
+async function selectHardGeneric(playerId: string, sessionId?: string): Promise<any> {
+  return await selectUnseenQuestion(playerId, 'hard', sessionId);
 }
 
 // Fonction pour marquer une question comme vue
@@ -432,11 +414,13 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: "Plus de saut disponible" });
       }
 
-      // Sélectionner une nouvelle question de même difficulté (enfant si Q<=4)
+      // Sélectionner une nouvelle question de même difficulté (enfant si Q<=2)
       const diff = getDifficultyForQuestion(session.currentQuestion);
-      const nextQuestion = session.currentQuestion <= 4
+      const nextQuestion = session.currentQuestion <= 2
         ? await selectKidFriendlyQuestion(session.playerId, session.id)
-        : await selectUnseenQuestion(session.playerId, diff, session.id);
+        : (diff === 'medium'
+            ? await selectUnseenQuestion(session.playerId, diff, session.id)
+      : await selectHardGeneric(session.playerId, session.id));
       if (!nextQuestion) {
         return reply.status(500).send({ error: "Aucune autre question disponible" });
       }
@@ -577,9 +561,11 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         // AUTO-SKIP: décrémenter le skip, marquer la question, et fournir une nouvelle question même difficulté
         // Sélectionner la prochaine question (même logique que /skip)
         const diff = getDifficultyForQuestion(session.currentQuestion);
-        const nextQuestion = session.currentQuestion <= 4
+        const nextQuestion = session.currentQuestion <= 2
           ? await selectKidFriendlyQuestion(session.playerId, session.id)
-          : await selectUnseenQuestion(session.playerId, diff, session.id);
+          : (diff === 'medium'
+              ? await selectUnseenQuestion(session.playerId, diff, session.id)
+              : await selectHardGeneric(session.playerId, session.id));
         if (!nextQuestion) {
           return reply.status(500).send({ error: "Aucune autre question disponible" });
         }
@@ -756,11 +742,8 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         throw err;
       }
 
-  // S'assurer d'un stock suffisant de questions enfants (sans images) — en arrière-plan pour ne pas bloquer
+  // Précharger pools nécessaires (kids pour Q1-2, medium générique pour Q3-5, hard IQ/logic pour 6-10 via génération standard)
   try { ensureKidsPool(450, 500).catch(() => {}); } catch {}
-  // Sélection enfant (easy) classique
-  // Préparer en arrière-plan le pool medium ciblé (pour futures Q5-7)
-  try { ensureMediumPool(450, 500).catch(() => {}); } catch {}
   const question = await selectKidFriendlyQuestion(player.id, session.id);
 
       if (!question) {
@@ -835,18 +818,19 @@ export async function registerQuizRoutes(app: FastifyInstance) {
   // Déterminer la difficulté à partir de la question courante (règle dynamique)
   const difficulty = getDifficultyForQuestion(activeSession.currentQuestion);
 
-    // Sélectionner une question non vue (enfant si Q<=4)
-    if (activeSession.currentQuestion <= 4) {
+    // Sélectionner une question non vue (enfant si Q<=2)
+    if (activeSession.currentQuestion <= 2) {
       try { ensureKidsPool(450, 500).catch(() => {}); } catch {}
     }
-    if (activeSession.currentQuestion <= 7 && activeSession.currentQuestion > 4) {
+    if (activeSession.currentQuestion <= 5 && activeSession.currentQuestion > 2) {
       try { ensureMediumPool(450, 500).catch(() => {}); } catch {}
     }
-    const question = activeSession.currentQuestion <= 4
+    // Plus de préchargement spécifique pour 'hard' (QI/Logique) — on reste générique
+    const question = activeSession.currentQuestion <= 2
       ? await selectKidFriendlyQuestion(player.id, activeSession.id)
-      : (activeSession.currentQuestion <= 7
-          ? await selectMediumPreferred(player.id, activeSession.id)
-          : await selectUnseenQuestion(player.id, difficulty, activeSession.id));
+      : (activeSession.currentQuestion <= 5
+          ? await selectUnseenQuestion(player.id, 'medium', activeSession.id)
+          : await selectHardGeneric(player.id, activeSession.id));
       if (!question) {
         return reply.status(500).send({ error: "Aucune question disponible pour reprise" });
       }
@@ -992,17 +976,18 @@ export async function registerQuizRoutes(app: FastifyInstance) {
 
   // Récupérer la prochaine question (non vue) - enfant si Q<=4
   const nextDifficulty = getDifficultyForQuestion(session.currentQuestion + 1);
-  if ((session.currentQuestion + 1) <= 4) {
+  if ((session.currentQuestion + 1) <= 2) {
     try { ensureKidsPool(450, 500).catch(() => {}); } catch {}
   }
-  if ((session.currentQuestion + 1) <= 7 && (session.currentQuestion + 1) > 4) {
+  if ((session.currentQuestion + 1) <= 5 && (session.currentQuestion + 1) > 2) {
     try { ensureMediumPool(450, 500).catch(() => {}); } catch {}
   }
-  const nextQuestion = (session.currentQuestion + 1) <= 4
+  // Plus de préchargement spécifique pour 'hard' (QI/Logique) — on reste générique
+  const nextQuestion = (session.currentQuestion + 1) <= 2
     ? await selectKidFriendlyQuestion(session.player.id, session.id)
-    : ((session.currentQuestion + 1) <= 7
-        ? await selectMediumPreferred(session.player.id, session.id)
-        : await selectUnseenQuestion(session.player.id, nextDifficulty, session.id));
+    : ((session.currentQuestion + 1) <= 5
+        ? await selectUnseenQuestion(session.player.id, 'medium', session.id)
+  : await selectHardGeneric(session.player.id, session.id));
 
         if (!nextQuestion) {
           return reply.status(500).send({ error: "Erreur chargement question suivante" });
