@@ -52,13 +52,16 @@ export async function registerPropertyRoutes(app: FastifyInstance) {
         } catch {}
       }
       const quotas = await ensurePropertyTypeQuotas(5, { priceMultiplier: inflationIndex });
-      // Ensurer explicitement 10 six-plex (units=6) si quota général n'a pas suffi
-      const sixplexCount = await app.prisma.propertyTemplate.count({ where: { units: 6 } });
-      let sixplexCreated = 0;
-      if (sixplexCount < 10) {
-        const targets: Record<number, number> = { 6: 10 };
-        const exact = await ensureExactTypeCounts(targets);
-        sixplexCreated = exact["6-plex(6)"]?.created || 0;
+      // Ensurer explicitement 10 six-plex (units=6) et 10 tours (units=50) si quotas généraux n'ont pas suffi
+      const countsNeeded: Record<number, number> = {};
+      const sixCount = await app.prisma.propertyTemplate.count({ where: { units: 6 } });
+      if (sixCount < 10) countsNeeded[6] = 10;
+      const towerCount = await app.prisma.propertyTemplate.count({ where: { units: 50 } });
+      if (towerCount < 10) countsNeeded[50] = 10;
+      let extraCreated = 0;
+      if (Object.keys(countsNeeded).length) {
+        const exact = await ensureExactTypeCounts(countsNeeded, { priceMultiplier: inflationIndex });
+        extraCreated = Object.values(exact).reduce((s, r) => s + r.created, 0);
       }
 
       // Compter les templates DISPONIBLES pour ce jeu (non achetés dans cette partie + pas d'anciennes images picsum)
@@ -89,7 +92,7 @@ export async function registerPropertyRoutes(app: FastifyInstance) {
       }
 
   const total = await app.prisma.propertyTemplate.count();
-  return reply.send({ ok: true, available, created, total, quotas, inflationIndex, sixplexCreated });
+  return reply.send({ ok: true, available, created, total, quotas, inflationIndex });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Erreur de remplissage";
       return reply.status(500).send({ error: message });
@@ -133,7 +136,18 @@ export async function registerPropertyRoutes(app: FastifyInstance) {
       async function countAvailable(units: number) {
         return await app.prisma.propertyTemplate.count({ where: purchasedIds.size ? { units, id: { notIn: Array.from(purchasedIds) } } : { units } });
       }
-      const desired = { 1:5, 2:5, 3:5, 6:5, 50:5 } as Record<number, number>;
+      // Cibles par défaut (peuvent être surchargées via body.targets)
+      const desiredDefault = { 1:5, 2:5, 3:5, 6:5, 50:5 } as Record<number, number>;
+      const body = typeof (req as any).body === 'string' ? JSON.parse((req as any).body) : ((req as any).body || {});
+      const incomingTargets = body?.targets as Record<number|string, number> | undefined;
+      const desired: Record<number, number> = { ...desiredDefault };
+      if (incomingTargets && typeof incomingTargets === 'object') {
+        for (const [k,v] of Object.entries(incomingTargets)) {
+          const u = Number(k);
+          const n = Number(v);
+          if (Number.isFinite(u) && Number.isFinite(n) && u > 0 && n >= 0) desired[u] = n;
+        }
+      }
       const before: Record<string, number> = {};
       const deficits: Record<number, number> = {};
       for (const [uStr, need] of Object.entries(desired)) {
@@ -163,7 +177,7 @@ export async function registerPropertyRoutes(app: FastifyInstance) {
         after[uStr] = await countAvailable(Number(uStr));
       }
 
-      return reply.send({ ok: true, desired, before, after, created: createdTotal, inflationIndex });
+  return reply.send({ ok: true, desired, before, after, created: createdTotal, inflationIndex });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Erreur maintain-bank";
       return reply.status(500).send({ error: message });
