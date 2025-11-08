@@ -242,7 +242,7 @@ export async function ensurePropertyTypeQuotas(minPerType = 5, opts?: { priceMul
 
 // Assurer des cibles exactes par type (par nombre d'unités)
 // Exemple: {1:10,2:10,3:10,6:10,50:5} => au moins ces quantités en banque.
-export async function ensureExactTypeCounts(targets: Record<number, number>) {
+export async function ensureExactTypeCounts(targets: Record<number, number>, opts?: { priceMultiplier?: number }) {
   function rand(min: number, max: number) { return Math.random() * (max - min) + min; }
   function randi(min: number, max: number) { return Math.round(rand(min, max)); }
   const cities = [
@@ -273,7 +273,10 @@ export async function ensureExactTypeCounts(targets: Record<number, number>) {
       const baseRent = randi(rr.min, rr.max);
       const annualGross = baseRent * units * 12;
       const grm = Math.round(rand(10, 15) * 10) / 10; // 10.0..15.0
-      const price = Math.round(annualGross * grm);
+      let price = Math.round(annualGross * grm);
+      if (opts?.priceMultiplier && opts.priceMultiplier > 0) {
+        price = Math.round(price * opts.priceMultiplier);
+      }
       const expensesAnnual = Math.round(annualGross * rand(0.25, 0.35));
       const taxes = Math.round(expensesAnnual * 0.4);
       const insurance = Math.round(expensesAnnual * 0.15);

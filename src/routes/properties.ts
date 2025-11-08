@@ -111,6 +111,65 @@ export async function registerPropertyRoutes(app: FastifyInstance) {
     return reply.send({ holdings });
   });
 
+  // Maintenir automatiquement au moins 5 templates disponibles par type principal (Maison, Duplex, Triplex, 6-plex, Tour à condos)
+  // Endpoint: POST /api/games/:gameId/properties/maintain-bank
+  // Idée: après une vente ou un achat côté client tu peux l'appeler pour recompléter instantanément
+  app.post("/api/games/:gameId/properties/maintain-bank", async (req, reply) => {
+    const paramsSchema = z.object({ gameId: z.string() });
+    const { gameId } = paramsSchema.parse((req as any).params);
+    try {
+      // Lire inflation index pour ajuster les prix des nouveaux templates
+      let inflationIndex = 1;
+      try {
+        const g = await (app.prisma as any).game.findUnique({ where: { id: gameId }, select: { inflationIndex: true } });
+        inflationIndex = Number(g?.inflationIndex ?? 1) || 1;
+      } catch {}
+
+      // Récupérer les templates déjà ACHETÉS dans cette partie pour les exclure de la disponibilité
+      const purchased = await app.prisma.propertyHolding.findMany({ where: { gameId }, select: { templateId: true } });
+      const purchasedIds = new Set(purchased.map(p => p.templateId));
+
+      // Compter la disponibilité par type (basé sur units) excluant les achetés
+      async function countAvailable(units: number) {
+        return await app.prisma.propertyTemplate.count({ where: purchasedIds.size ? { units, id: { notIn: Array.from(purchasedIds) } } : { units } });
+      }
+      const desired = { 1:5, 2:5, 3:5, 6:5, 50:5 } as Record<number, number>;
+      const before: Record<string, number> = {};
+      const deficits: Record<number, number> = {};
+      for (const [uStr, need] of Object.entries(desired)) {
+        const u = Number(uStr);
+        const avail = await countAvailable(u);
+        before[uStr] = avail;
+        if (avail < need) deficits[u] = need - avail;
+      }
+
+      let createdTotal = 0;
+      if (Object.keys(deficits).length) {
+        // ensureExactTypeCounts crée jusqu'à atteindre le total cible global (inclut existants). On calcule cible = existants + déficit.
+        const targets: Record<number, number> = {};
+        for (const [uStr, need] of Object.entries(desired)) {
+          const u = Number(uStr);
+          const currentGlobal = await app.prisma.propertyTemplate.count({ where: { units: u } });
+          const deficitLocal = deficits[u] || 0;
+          targets[u] = currentGlobal + deficitLocal; // viser le global + déficit pour que la disponibilité (non achetés) atteigne le besoin
+        }
+        const res = await ensureExactTypeCounts(targets, { priceMultiplier: inflationIndex });
+        createdTotal = Object.values(res).reduce((s, r) => s + r.created, 0);
+      }
+
+      // Recompter après éventuelle création
+      const after: Record<string, number> = {};
+      for (const [uStr] of Object.entries(desired)) {
+        after[uStr] = await countAvailable(Number(uStr));
+      }
+
+      return reply.send({ ok: true, desired, before, after, created: createdTotal, inflationIndex });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Erreur maintain-bank";
+      return reply.status(500).send({ error: message });
+    }
+  });
+
   // Bilan détaillé d'un holding (cashflows cumulés)
   app.get("/api/games/:gameId/properties/bilan/:holdingId", async (req, reply) => {
     const paramsSchema = z.object({ gameId: z.string(), holdingId: z.string() });
