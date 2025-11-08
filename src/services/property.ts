@@ -42,6 +42,8 @@ export async function purchaseProperty({
 
   const price = template.price;
   const sanitizedPercent = Math.max(0.2, Math.min(1, downPaymentPercent));
+  // Loyer ajusté par le nombre d'unités (ex: 50 condos -> 50 × baseRent)
+  const units = Number((template as any).units ?? 1);
   const downPayment = Math.round(price * sanitizedPercent);
   if (player.cash < downPayment) throw new Error("Liquidités insuffisantes");
 
@@ -62,7 +64,7 @@ export async function purchaseProperty({
         templateId,
         purchasePrice: price,
         currentValue: price,
-        currentRent: template.baseRent,
+  currentRent: template.baseRent * Math.max(1, units),
         mortgageRate,
         mortgageDebt: mortgagePrincipal,
         weeklyPayment,

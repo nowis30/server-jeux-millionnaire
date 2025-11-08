@@ -13,7 +13,8 @@ interface GeneratedQuestion {
   optionD: string;
   correctAnswer: 'A' | 'B' | 'C' | 'D';
   difficulty: 'easy' | 'medium' | 'hard';
-  category: 'finance' | 'economy' | 'real-estate' | 'business' | 'technology' | 'science' | 'history' | 'geography' | 'sports' | 'arts' | 'cinema' | 'music' | 'literature' | 'culture' | 'nature' | 'health' | 'food' | 'general' | 'animals' | 'translation' | 'kids' | 'enfants' | 'quebec' | 'definitions' | 'religions';
+  // Ajout des catégories 'logic' et 'iq' pour questions de raisonnement / QI
+  category: 'finance' | 'economy' | 'real-estate' | 'business' | 'technology' | 'science' | 'history' | 'geography' | 'sports' | 'arts' | 'cinema' | 'music' | 'literature' | 'culture' | 'nature' | 'health' | 'food' | 'general' | 'animals' | 'translation' | 'kids' | 'enfants' | 'quebec' | 'definitions' | 'religions' | 'logic' | 'iq';
   imageUrl?: string; // URL optionnelle d'une image illustrant la question
 }
 
@@ -38,6 +39,8 @@ Catégories disponibles:
 - general: Culture générale variée, faits intéressants
 - animals: Zoologie, espèces, habitats, comportements, chaînes alimentaires
 - translation: Traduction FR/EN, faux amis, synonymes, expressions courantes
+ - logic: Logique, suites de nombres, analogies, puzzles courts, déduction
+ - iq: Problèmes de type QI: matrices conceptuelles simplifiées, séries, classification, relations
  - kids, enfants: Questions pour enfants (6–9 ans), vocabulaire simple, monde concret, thèmes ludiques
 
 Pour certaines questions, tu peux ajouter une image pour illustrer (personnage historique, monument, animal, œuvre d'art, etc.). Utilise des URLs d'images Unsplash ou Pexels en haute qualité.
@@ -158,7 +161,7 @@ const difficultyPrompts = {
 };
 
 export const allowedCategories = [
-  'finance','economy','real-estate','business','technology','science','history','geography','sports','arts','cinema','music','literature','culture','nature','health','food','general','animals','translation','kids','enfants','quebec','definitions','religions'
+  'finance','economy','real-estate','business','technology','science','history','geography','sports','arts','cinema','music','literature','culture','nature','health','food','general','animals','translation','kids','enfants','quebec','definitions','religions','logic','iq'
 ] as const;
 
 const categoryPrompts = {
@@ -187,7 +190,63 @@ const categoryPrompts = {
   quebec: "Culture québécoise et canadienne-française: expressions, traditions, géographie locale (provinces/villes), sport (Canadiens de Montréal), histoire (Nouvelle-France), gastronomie (poutine, sirop d'érable)",
   definitions: "Définitions de mots en français (niveau intermédiaire): synonymes, antonymes, sens le plus juste, choix du bon terme dans un contexte",
   religions: "Religions du monde (faits neutres): principales croyances, lieux de culte, fêtes majeures, figures fondatrices, répartition géographique. Évite tout jugement ou controverse, reste factuel."
+  ,logic: "Logique formelle et puzzles courts: suites de nombres, analogies, syllogismes simples, classification, relations (A est à B ce que C est à ?). Pas de calculs lourds."
+  ,iq: "Questions de style QI: motifs conceptuels (sans images), complétion de séries, raisonnement abstrait, sélection de l'élément différent. Clarté et une seule réponse indiscutable."
 };
+
+// Quelques questions statiques de logique/QI si l'API OpenAI n'est pas disponible
+const STATIC_LOGIC_QUESTIONS: GeneratedQuestion[] = [
+  {
+    question: "Quelle lettre complète la suite: A, C, F, J, O, ?",
+    optionA: "S",
+    optionB: "T",
+    optionC: "U",
+    optionD: "V",
+    correctAnswer: 'B', // T (différences +2,+3,+4,+5 => +6)
+    difficulty: 'medium',
+    category: 'logic'
+  },
+  {
+    question: "Trouver l'intrus: cube, sphère, cercle, pyramide",
+    optionA: "cube",
+    optionB: "sphère",
+    optionC: "cercle",
+    optionD: "pyramide",
+    correctAnswer: 'C', // cercle (2D vs 3D)
+    difficulty: 'easy',
+    category: 'logic'
+  },
+  {
+    question: "Suite numérique: 3, 6, 11, 18, 27, ?",
+    optionA: "36",
+    optionB: "38",
+    optionC: "40",
+    optionD: "42",
+    correctAnswer: 'B', // +3,+5,+7,+9,+11 => 27+11 = 38 
+    difficulty: 'easy',
+    category: 'iq'
+  },
+  {
+    question: "Si TORE est 1, ROTE est 2, TER0 est 3, quel est 4? (Permutation des lettres en gardant T,R,O,E)",
+    optionA: "ETOR",
+    optionB: "ERTO",
+    optionC: "OTRE",
+    optionD: "RETO",
+    correctAnswer: 'A',
+    difficulty: 'hard',
+    category: 'iq'
+  },
+  {
+    question: "Analogies: LUNE est à NUIT comme SOLEIL est à ?",
+    optionA: "AUBE",
+    optionB: "JOUR",
+    optionC: "ÉTÉ",
+    optionD: "CHALEUR",
+    correctAnswer: 'B',
+    difficulty: 'easy',
+    category: 'logic'
+  }
+];
 
 /**
  * Mélange l'ordre des options de réponse et ajuste correctAnswer
@@ -230,37 +289,99 @@ function defaultImageForDifficulty(_diff: 'easy'|'medium'|'hard'): string {
 }
 
 /**
- * Vérifie si une question similaire existe déjà (éviter les doublons)
+ * Normalisation avancée du texte: minuscules, suppression accents, ponctuation, chiffres, stop-words FR
  */
-async function isDuplicate(question: string): Promise<boolean> {
-  // Normaliser le texte pour la comparaison
-  const normalized = question.toLowerCase().trim();
-  
-  // Chercher des questions similaires (même texte ou très proche)
-  const existing = await prisma.quizQuestion.findMany({
-    select: { question: true }
-  });
+export function normalizeFr(text: string): string {
+  const lower = (text || '').toLowerCase();
+  const noAccents = lower.normalize('NFD').replace(/\p{Diacritic}+/gu, '');
+  const noPunctNum = noAccents.replace(/[^a-z\s]/g, ' ');
+  const tokens = noPunctNum.split(/\s+/).filter(Boolean);
+  const STOP = new Set([
+    'le','la','les','un','une','des','du','de','d','deux','trois','quatre','cinq','six','sept','huit','neuf','dix',
+    'et','ou','est','sont','quel','quelle','quels','quelles','lequel','laquelle','lesquels','lesquelles','que','qui',
+    'dans','sur','au','aux','a','à','pour','par','avec','sans','ce','cet','cette','ces','son','sa','ses','leur','leurs',
+    'auquel','auxquels','auxquelles','duquel','desquels','desquelles','de','la','aupres','chez','comme','plus','moins',
+    'quelque','quoi','dont','lors','entre','contre','vers','afin','car','donc','or','ni','mais','si','y','on','nous',
+  ]);
+  const filtered = tokens.filter(t => !STOP.has(t));
+  return filtered.join(' ');
+}
 
-  for (const q of existing) {
-    const existingNormalized = q.question.toLowerCase().trim();
-    
-    // Vérifier similarité exacte
-    if (existingNormalized === normalized) {
-      return true;
-    }
-    
-    // Vérifier similarité très proche (90% des mots en commun)
-    const words1 = new Set(normalized.split(/\s+/));
-    const words2 = new Set(existingNormalized.split(/\s+/));
-    const intersection = new Set([...words1].filter(x => words2.has(x)));
-    const union = new Set([...words1, ...words2]);
-    const similarity = intersection.size / union.size;
-    
-    if (similarity > 0.9) {
-      return true;
+export function tokenize(text: string): string[] {
+  return normalizeFr(text).split(/\s+/).filter(Boolean);
+}
+
+export function jaccard<T>(a: Set<T>, b: Set<T>): number {
+  if (a.size === 0 && b.size === 0) return 1;
+  const inter = new Set([...a].filter(x => b.has(x)));
+  const uni = new Set([...a, ...b]);
+  return inter.size / uni.size;
+}
+
+export function charNgrams(text: string, n: number): Set<string> {
+  const s = normalizeFr(text).replace(/\s+/g, ' ');
+  const grams: string[] = [];
+  for (let i = 0; i <= Math.max(0, s.length - n); i++) {
+    grams.push(s.slice(i, i + n));
+  }
+  return new Set(grams);
+}
+
+export function levenshtein(a: string, b: string): number {
+  const s = normalizeFr(a); const t = normalizeFr(b);
+  const m = s.length; const n = t.length;
+  if (m === 0) return n; if (n === 0) return m;
+  const dp = Array.from({ length: m + 1 }, (_, i) => new Array<number>(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const cost = s[i - 1] === t[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + cost
+      );
     }
   }
+  return dp[m][n];
+}
 
+/**
+ * Vérifie si une question similaire existe déjà (éviter les doublons et paraphrases)
+ */
+async function isDuplicate(question: string): Promise<boolean> {
+  const existing = await prisma.quizQuestion.findMany({ select: { question: true } });
+
+  const tokensNew = new Set(tokenize(question));
+  const gramsNew3 = charNgrams(question, 3);
+  const lenNew = normalizeFr(question).length;
+
+  for (const q of existing) {
+    const qText = q.question || '';
+    // Exact match (après normalisation simple)
+    if (qText.trim().toLowerCase() === question.trim().toLowerCase()) return true;
+
+    const tokensOld = new Set(tokenize(qText));
+    const gramsOld3 = charNgrams(qText, 3);
+
+    // 1) Similarité Jaccard sur tokens (après stop-words): seuil 0.8
+    const jac = jaccard(tokensNew, tokensOld);
+    if (jac >= 0.8) return true;
+
+    // 2) Similarité caractères trigrammes: seuil 0.85
+    const jac3 = jaccard(gramsNew3, gramsOld3);
+    if (jac3 >= 0.85) return true;
+
+    // 3) Levenshtein relatif (pour courtes questions re-formulées)
+    const lenOld = normalizeFr(qText).length;
+    const maxLen = Math.max(1, Math.max(lenNew, lenOld));
+    if (maxLen <= 120) { // éviter coût sur très longs textes
+      const lev = levenshtein(question, qText);
+      const rel = lev / maxLen;
+      if (rel <= 0.2) return true; // distance faible => proche
+    }
+  }
   return false;
 }
 
@@ -274,6 +395,14 @@ export async function generateQuestionsWithAI(
 ): Promise<GeneratedQuestion[]> {
   
   if (!process.env.OPENAI_API_KEY) {
+    // Fallback statique pour logique/QI si pas de clé
+    if (category === 'logic' || category === 'iq') {
+      console.warn("[AI] Pas de clé OpenAI – utilisation fallback statique logique/QI");
+      return STATIC_LOGIC_QUESTIONS
+        .filter(q => q.category === category)
+        .slice(0, count)
+        .map(q => ({ ...q }));
+    }
     console.warn("[AI] OPENAI_API_KEY non configurée, génération IA désactivée");
     return [];
   }
@@ -344,6 +473,9 @@ export async function generateAndSaveQuestions(): Promise<number> {
     const batches = [
       // Pool enfants dédié (ajout initial pour alimenter Q1-Q4) - petites séries
       { difficulty: 'easy' as const, category: 'kids' as const, count: 6 },
+      // Ajout logique/QI faciles pour diversifier les premières questions
+      { difficulty: 'easy' as const, category: 'logic' as const, count: 4 },
+      { difficulty: 'easy' as const, category: 'iq' as const, count: 3 },
       // Questions faciles (40 questions) - Culture générale accessible
       { difficulty: 'easy' as const, category: 'general' as const, count: 5 },
       { difficulty: 'easy' as const, category: 'geography' as const, count: 4 },
@@ -366,6 +498,8 @@ export async function generateAndSaveQuestions(): Promise<number> {
       { difficulty: 'medium' as const, category: 'definitions' as const, count: 4 },
       { difficulty: 'medium' as const, category: 'quebec' as const, count: 4 },
       { difficulty: 'medium' as const, category: 'religions' as const, count: 4 },
+  { difficulty: 'medium' as const, category: 'logic' as const, count: 4 },
+  { difficulty: 'medium' as const, category: 'iq' as const, count: 3 },
       { difficulty: 'medium' as const, category: 'history' as const, count: 4 },
       { difficulty: 'medium' as const, category: 'science' as const, count: 4 },
       { difficulty: 'medium' as const, category: 'literature' as const, count: 3 },
@@ -394,6 +528,8 @@ export async function generateAndSaveQuestions(): Promise<number> {
       { difficulty: 'hard' as const, category: 'geography' as const, count: 2 },
       { difficulty: 'hard' as const, category: 'economy' as const, count: 2 },
       { difficulty: 'hard' as const, category: 'health' as const, count: 1 },
+      { difficulty: 'hard' as const, category: 'logic' as const, count: 2 },
+      { difficulty: 'hard' as const, category: 'iq' as const, count: 2 },
     ];
 
     let totalCreated = 0;
@@ -466,7 +602,7 @@ export async function ensureKidsPool(minKids = 450, targetKids = 500): Promise<{
   // Calculer le stock enfants restant (non utilisés globalement)
   const kidsCategories = ['kids','enfants'] as const;
   const kidsTotal = await prisma.quizQuestion.count({ where: { category: { in: kidsCategories as any }, difficulty: 'easy' } });
-  const kidsUsed = await prisma.quizAttempt.findMany({ where: { question: { category: { in: kidsCategories as any }, difficulty: 'easy' } }, distinct: ["questionId"], select: { questionId: true } }).then(r => r.length);
+  const kidsUsed = await prisma.quizAttempt.findMany({ where: { question: { category: { in: kidsCategories as any }, difficulty: 'easy' } }, distinct: ["questionId"], select: { questionId: true } }).then((r: Array<{ questionId: string }>) => r.length);
   const kidsRemaining = Math.max(0, kidsTotal - kidsUsed);
 
   if (!process.env.OPENAI_API_KEY) {
@@ -483,7 +619,7 @@ export async function ensureKidsPool(minKids = 450, targetKids = 500): Promise<{
   const batchSize = 12;
   // Pré-charger les questions enfants existantes pour une déduplication rapide
   const existingKids = await prisma.quizQuestion.findMany({ where: { category: { in: kidsCategories as any }, difficulty: 'easy' }, select: { question: true } });
-  const existingSet = new Set(existingKids.map(q => q.question.toLowerCase().trim()));
+  const existingSet = new Set(existingKids.map((q: { question: string }) => q.question.toLowerCase().trim()));
 
   for (let i = 0; i < Math.ceil(toCreate / batchSize); i++) {
     try {
@@ -529,7 +665,7 @@ export async function ensureMediumPool(minMedium = 450, targetMedium = 500): Pro
   const mediumCats = ['definitions','quebec','religions'] as const;
   // Compter total et utilisées (distinct attempts) pour ces catégories difficulté medium
   const mediumTotal = await prisma.quizQuestion.count({ where: { category: { in: mediumCats as any }, difficulty: 'medium' } });
-  const mediumUsed = await prisma.quizAttempt.findMany({ where: { question: { category: { in: mediumCats as any }, difficulty: 'medium' } }, distinct: ['questionId'], select: { questionId: true } }).then(r => r.length);
+  const mediumUsed = await prisma.quizAttempt.findMany({ where: { question: { category: { in: mediumCats as any }, difficulty: 'medium' } }, distinct: ['questionId'], select: { questionId: true } }).then((r: Array<{ questionId: string }>) => r.length);
   const mediumRemaining = Math.max(0, mediumTotal - mediumUsed);
 
   if (!process.env.OPENAI_API_KEY) {
@@ -546,7 +682,7 @@ export async function ensureMediumPool(minMedium = 450, targetMedium = 500): Pro
   const batchSize = 10;
   // Pré-charger pour déduplication rapide
   const existingMedium = await prisma.quizQuestion.findMany({ where: { category: { in: mediumCats as any }, difficulty: 'medium' }, select: { question: true } });
-  const existingSet = new Set(existingMedium.map(q => q.question.toLowerCase().trim()));
+  const existingSet = new Set(existingMedium.map((q: { question: string }) => q.question.toLowerCase().trim()));
 
   // Boucles de génération alternant entre definitions et quebec
   for (let i = 0; i < Math.ceil(toCreate / batchSize); i++) {
@@ -651,7 +787,7 @@ export async function generateTwentyPerCategory(): Promise<number> {
 export async function replenishIfLow(threshold = 100): Promise<{ remaining: number; created: number }> {
   // Calcule le "remaining" en excluant globalement les questions déjà posées
   const total = await prisma.quizQuestion.count();
-  const used = await prisma.quizAttempt.findMany({ distinct: ["questionId"], select: { questionId: true } }).then(r => r.length);
+  const used = await prisma.quizAttempt.findMany({ distinct: ["questionId"], select: { questionId: true } }).then((r: Array<{ questionId: string }>) => r.length);
   const remaining = Math.max(0, total - used);
 
   if (remaining <= threshold) {
@@ -699,7 +835,7 @@ async function generateAndSaveBatch(diff: 'easy'|'medium'|'hard', cat: typeof al
 export async function maintainQuestionStock(min = 300, target = 400): Promise<{ remaining: number; created: number; target: number }> {
   // Calcule le stock restant (total - utilisées globalement)
   const total = await prisma.quizQuestion.count();
-  const used = await prisma.quizAttempt.findMany({ distinct: ["questionId"], select: { questionId: true } }).then(r => r.length);
+  const used = await prisma.quizAttempt.findMany({ distinct: ["questionId"], select: { questionId: true } }).then((r: Array<{ questionId: string }>) => r.length);
   const remaining = Math.max(0, total - used);
 
   if (!process.env.OPENAI_API_KEY) {
@@ -716,7 +852,7 @@ export async function maintainQuestionStock(min = 300, target = 400): Promise<{ 
   // 1) Assurer un stock minimum de questions enfants faciles (catégorie kids/enfants)
   const kidsCategories = ['kids','enfants'] as const;
   const kidsTotal = await prisma.quizQuestion.count({ where: { category: { in: kidsCategories as any } } });
-  const kidsUsed = await prisma.quizAttempt.findMany({ where: { question: { category: { in: kidsCategories as any } } }, distinct: ["questionId"], select: { questionId: true } }).then(r => r.length);
+  const kidsUsed = await prisma.quizAttempt.findMany({ where: { question: { category: { in: kidsCategories as any } } }, distinct: ["questionId"], select: { questionId: true } }).then((r: Array<{ questionId: string }>) => r.length);
   const kidsRemaining = Math.max(0, kidsTotal - kidsUsed);
   const minKids = 150;
   const targetKids = 200;
@@ -772,6 +908,58 @@ export async function maintainQuestionStock(min = 300, target = 400): Promise<{ 
 }
 
 /**
+ * Assure un stock minimum de questions LOGIC / IQ (raisonnement abstrait).
+ */
+export async function ensureLogicPool(minLogic = 120, targetLogic = 160): Promise<{ created: number; remaining: number; target: number }> {
+  const logicCats = ['logic','iq'] as const;
+  const logicTotal = await prisma.quizQuestion.count({ where: { category: { in: logicCats as any } } });
+  const logicUsed = await prisma.quizAttempt.findMany({ where: { question: { category: { in: logicCats as any } } }, distinct: ["questionId"], select: { questionId: true } }).then((r: Array<{ questionId: string }>) => r.length);
+  const logicRemaining = Math.max(0, logicTotal - logicUsed);
+
+  if (logicRemaining >= minLogic) {
+    return { created: 0, remaining: logicRemaining, target: targetLogic };
+  }
+
+  let created = 0;
+  const toCreate = Math.max(0, targetLogic - logicRemaining);
+  // Fallback si pas de clé: insérer questions statiques jusqu'à cible
+  if (!process.env.OPENAI_API_KEY) {
+    for (const base of STATIC_LOGIC_QUESTIONS) {
+      if (created >= toCreate) break;
+      if (await isDuplicate(base.question)) continue;
+      const shuffled = shuffleAnswers(base);
+      await prisma.quizQuestion.create({
+        data: { question: shuffled.question, optionA: shuffled.optionA, optionB: shuffled.optionB, optionC: shuffled.optionC, optionD: shuffled.optionD, correctAnswer: shuffled.correctAnswer, difficulty: shuffled.difficulty, category: shuffled.category, imageUrl: null }
+      });
+      created++;
+    }
+    return { created, remaining: logicRemaining + created, target: targetLogic };
+  }
+
+  const batchSize = 8;
+  for (let i = 0; i < Math.ceil(toCreate / batchSize); i++) {
+    for (const cat of logicCats) {
+      if (created >= toCreate) break;
+      try {
+        const raw = await generateQuestionsWithAI(i % 3 === 0 ? 'easy' : i % 3 === 1 ? 'medium' : 'hard', cat as any, Math.min(batchSize, toCreate - created));
+        for (const q0 of raw) {
+          try {
+            if (await isDuplicate(q0.question)) continue;
+            const shuffled = shuffleAnswers(q0);
+            await prisma.quizQuestion.create({
+              data: { question: shuffled.question, optionA: shuffled.optionA, optionB: shuffled.optionB, optionC: shuffled.optionC, optionD: shuffled.optionD, correctAnswer: shuffled.correctAnswer, difficulty: shuffled.difficulty, category: cat, imageUrl: null }
+            });
+            created++;
+          } catch {}
+        }
+        await new Promise(r => setTimeout(r, 400));
+      } catch {}
+    }
+  }
+  return { created, remaining: logicRemaining + created, target: targetLogic };
+}
+
+/**
  * Rotation des questions : supprime les plus anciennes si trop nombreuses
  */
 async function rotateQuestions() {
@@ -794,7 +982,7 @@ async function rotateQuestions() {
       });
 
       await prisma.quizQuestion.deleteMany({
-        where: { id: { in: oldest.map(q => q.id) } }
+  where: { id: { in: oldest.map((q: { id: string }) => q.id) } }
       });
 
       console.log(`[AI] ${toDelete} anciennes questions ${difficulty} supprimées`);
@@ -809,4 +997,90 @@ export async function testAIGeneration() {
   console.log("[AI] Test génération...");
   const questions = await generateQuestionsWithAI('medium', 'finance', 2);
   console.log(JSON.stringify(questions, null, 2));
+}
+
+/**
+ * Audit et nettoyage des doublons en base (similarité par Jaccard tokens + trigrammes)
+ * - threshold: 0.0–1.0 (0.8 recommandé)
+ * - dryRun: si true, ne supprime rien et renvoie uniquement les stats
+ */
+export async function auditAndCleanupDuplicates(threshold = 0.8, dryRun = true): Promise<{
+  total: number;
+  candidates: number;
+  toDelete: number;
+  deleted: number;
+  threshold: number;
+}> {
+  const all = await prisma.quizQuestion.findMany({
+    select: { id: true, question: true, createdAt: true, difficulty: true, category: true }
+  });
+
+  type Row = { id: string; question: string; createdAt: Date; difficulty: string; category: string; tokens: Set<string>; tri: Set<string> };
+  const rows: Row[] = all.map((q: any) => ({
+    id: q.id,
+    question: q.question || '',
+    createdAt: q.createdAt,
+    difficulty: q.difficulty,
+    category: q.category,
+    tokens: new Set(tokenize(q.question || '')),
+    tri: charNgrams(q.question || '', 3),
+  }));
+
+  // Grouper par difficulté pour réduire la complexité
+  const byDiff = new Map<string, Row[]>();
+  for (const r of rows) {
+    const arr = byDiff.get(r.difficulty) || [];
+    arr.push(r);
+    byDiff.set(r.difficulty, arr);
+  }
+
+  const toDeleteIds = new Set<string>();
+  let candidates = 0;
+
+  function sim(a: Row, b: Row): number {
+    const interTok = new Set([...a.tokens].filter(t => b.tokens.has(t))).size;
+    const unionTok = new Set([...a.tokens, ...b.tokens]).size || 1;
+    const jTok = interTok / unionTok;
+    const interTri = new Set([...a.tri].filter(t => b.tri.has(t))).size;
+    const unionTri = new Set([...a.tri, ...b.tri]).size || 1;
+    const jTri = interTri / unionTri;
+    return jTok * 0.6 + jTri * 0.4;
+  }
+
+  for (const [_diff, list] of byDiff.entries()) {
+    // Tri par createdAt pour conserver la plus ancienne
+    const l = [...list].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+    for (let i = 0; i < l.length; i++) {
+      const keep = l[i];
+      if (toDeleteIds.has(keep.id)) continue;
+      for (let j = i + 1; j < l.length; j++) {
+        const cand = l[j];
+        if (toDeleteIds.has(cand.id)) continue;
+        const s = sim(keep, cand);
+        if (s >= threshold) {
+          candidates++;
+          toDeleteIds.add(cand.id); // supprimer la plus récente
+        }
+      }
+    }
+  }
+
+  let deleted = 0;
+  if (!dryRun && toDeleteIds.size > 0) {
+    const ids = Array.from(toDeleteIds);
+    const BATCH = 200;
+    for (let i = 0; i < ids.length; i += BATCH) {
+      const slice = ids.slice(i, i + BATCH);
+      const res = await prisma.quizQuestion.deleteMany({ where: { id: { in: slice } } });
+      deleted += (res as any)?.count ?? slice.length;
+    }
+  }
+
+  return {
+    total: rows.length,
+    candidates,
+    toDelete: toDeleteIds.size,
+    deleted,
+    threshold,
+  };
 }

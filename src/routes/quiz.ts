@@ -2,7 +2,7 @@ import { FastifyInstance } from "fastify";
 import { prisma } from "../prisma";
 import { z } from "zod";
 import { requireUserOrGuest, requireAdmin } from "./auth";
-import { generateAndSaveQuestions, maintainQuestionStock, replenishIfLow, ensureKidsPool, ensureMediumPool } from "../services/aiQuestions";
+import { generateAndSaveQuestions, maintainQuestionStock, replenishIfLow, ensureKidsPool, ensureMediumPool, auditAndCleanupDuplicates } from "../services/aiQuestions";
 import {
   updatePlayerTokens,
   consumeQuizToken,
@@ -56,6 +56,37 @@ async function getUsedCategoriesForSession(sessionId: string): Promise<Set<strin
 }
 
 // Sélection d'une question non vue par difficulté en mélangeant les sujets
+// Calcule une signature normalisée pour comparer la similarité rapide (Jaccard tokens + trigrammes)
+function quickSignature(text: string) {
+  const base = text.toLowerCase().normalize('NFD').replace(/\p{Diacritic}+/gu,'').replace(/[^a-z\s]/g,' ').split(/\s+/).filter(Boolean).filter(t=>!['le','la','les','un','une','des','du','de','et','ou','est','sont','que','qui','dans','sur','au','aux','pour','par','avec','sans','ce','cet','cette','ces','son','sa','ses','leur','leurs','plus','moins','on','nous','vous','ils','elles'].includes(t));
+  const tokens = new Set(base);
+  const tri = new Set<string>();
+  const joined = base.join(' ');
+  for (let i=0;i<=Math.max(0, joined.length-3);i++) tri.add(joined.slice(i,i+3));
+  return { tokens, tri };
+}
+
+function similarity(sigA: ReturnType<typeof quickSignature>, sigB: ReturnType<typeof quickSignature>): number {
+  const interTok = new Set([...sigA.tokens].filter(x=>sigB.tokens.has(x))).size;
+  const unionTok = new Set([...sigA.tokens, ...sigB.tokens]).size || 1;
+  const jTok = interTok/unionTok;
+  const interTri = new Set([...sigA.tri].filter(x=>sigB.tri.has(x))).size;
+  const unionTri = new Set([...sigA.tri, ...sigB.tri]).size || 1;
+  const jTri = interTri/unionTri;
+  return (jTok*0.6 + jTri*0.4);
+}
+
+// Maintient un cache des dernières questions posées dans la session pour éviter paraphrases
+async function getRecentSessionQuestions(sessionId: string, limit = 5): Promise<Array<{ id: string; question: string }>> {
+  const attempts = await prisma.quizAttempt.findMany({
+    where: { sessionId },
+    include: { question: { select: { id: true, question: true } } },
+    orderBy: { answeredAt: 'desc' },
+    take: limit,
+  });
+  return attempts.map((a: { question: { id: string; question: string } }) => ({ id: a.question.id, question: a.question.question }));
+}
+
 async function selectUnseenQuestion(playerId: string, difficulty: string, sessionId?: string): Promise<any> {
   // Compter toutes les questions pour cette difficulté (toutes catégories confondues)
   const totalCountAll = await prisma.quizQuestion.count({ where: { difficulty } });
@@ -66,7 +97,7 @@ async function selectUnseenQuestion(playerId: string, difficulty: string, sessio
     where: { playerId, question: { difficulty } },
     select: { questionId: true },
   });
-  const seenIdsAll = seenInDifficulty.map((s) => s.questionId);
+  const seenIdsAll = seenInDifficulty.map((s: { questionId: string }) => s.questionId);
   const seenCountAll = seenIdsAll.length;
 
   // Questions déjà posées globalement (utilisées dans au moins une tentative)
@@ -75,7 +106,7 @@ async function selectUnseenQuestion(playerId: string, difficulty: string, sessio
     distinct: ["questionId"],
     select: { questionId: true },
   });
-  const usedIdsAll = new Set(globallyUsed.map((g) => g.questionId));
+  const usedIdsAll = new Set(globallyUsed.map((g: { questionId: string }) => g.questionId));
 
   // Si tout a été vu pour cette difficulté, on réinitialise et on prend au hasard
   if (seenCountAll >= totalCountAll) {
@@ -94,7 +125,7 @@ async function selectUnseenQuestion(playerId: string, difficulty: string, sessio
     distinct: ["category"],
     select: { category: true },
   });
-  let categoriesAll = distinctCats.map((c) => c.category).filter(Boolean) as string[];
+  let categoriesAll = distinctCats.map((c: { category: string }) => c.category).filter(Boolean) as string[];
   // Ordre des catégories: celles pas encore vues dans la session d'abord
   let categoriesOrder: string[] = categoriesAll;
   if (sessionId) {
@@ -106,6 +137,10 @@ async function selectUnseenQuestion(playerId: string, difficulty: string, sessio
     categoriesOrder = shuffle(categoriesOrder);
   }
 
+  // Préparer signatures des récentes questions pour filtrage sémantique
+  const recent = sessionId ? await getRecentSessionQuestions(sessionId, 7) : [];
+  const recentSigs = recent.map(r => ({ id: r.id, sig: quickSignature(r.question) }));
+
   // Essayer de choisir une question non vue par catégorie dans l'ordre calculé
   for (const category of categoriesOrder) {
     const totalCountCat = await prisma.quizQuestion.count({ where: { difficulty, category } });
@@ -115,17 +150,31 @@ async function selectUnseenQuestion(playerId: string, difficulty: string, sessio
       where: { playerId, question: { difficulty, category } },
       select: { questionId: true },
     });
-    const seenIdsCat = seenInCat.map((s) => s.questionId);
+  const seenIdsCat = seenInCat.map((s: { questionId: string }) => s.questionId);
     const excludedIdsCat = new Set([...seenIdsCat, ...Array.from(usedIdsAll)]);
     const unseenCountCat = totalCountCat - seenIdsCat.length;
     if (unseenCountCat <= 0) continue;
 
     const skip = Math.floor(Math.random() * unseenCountCat);
-    const q = await prisma.quizQuestion.findFirst({
+    let attempt = await prisma.quizQuestion.findFirst({
       where: { difficulty, category, id: { notIn: Array.from(excludedIdsCat) } },
       skip,
     });
-    if (q) return q;
+    if (attempt) {
+      const sigAttempt = quickSignature(attempt.question);
+      // Refuser si trop similaire (>0.75) à une des récentes
+      const tooClose = recentSigs.some(r => similarity(sigAttempt, r.sig) >= 0.75);
+      if (tooClose) {
+        // Chercher une autre dans la même catégorie (scan linéaire limité)
+        const alt = await prisma.quizQuestion.findMany({
+          where: { difficulty, category, id: { notIn: Array.from(excludedIdsCat) } },
+          take: 10,
+        });
+  const picked = alt.find((a: { question: string }) => !recentSigs.some(r => similarity(sigAttempt, quickSignature(a.question)) >= 0.75));
+        if (picked) attempt = picked;
+      }
+      if (attempt) return attempt;
+    }
   }
 
   // Fallback: choisir n'importe quelle question non vue pour la difficulté (toutes catégories)
@@ -133,10 +182,15 @@ async function selectUnseenQuestion(playerId: string, difficulty: string, sessio
   const unseenCountAll = totalCountAll - excludedAll.length;
   if (unseenCountAll > 0) {
     const skip = Math.floor(Math.random() * unseenCountAll);
-    return await prisma.quizQuestion.findFirst({
-      where: { difficulty, id: { notIn: excludedAll } },
-      skip,
-    });
+    const candidate = await prisma.quizQuestion.findFirst({ where: { difficulty, id: { notIn: excludedAll } }, skip });
+    if (candidate) {
+      const sigCand = quickSignature(candidate.question);
+      if (!recentSigs.some(r => similarity(sigCand, r.sig) >= 0.75)) return candidate;
+      // Fallback: chercher autre
+      const others = await prisma.quizQuestion.findMany({ where: { difficulty, id: { notIn: excludedAll } }, take: 15 });
+  const alt = others.find((o: { question: string }) => !recentSigs.some(r => similarity(quickSignature(o.question), r.sig) >= 0.75));
+      if (alt) return alt;
+    }
   }
 
   // Dernier recours (ne devrait pas arriver car on a géré la réinitialisation): aléatoire dans la difficulté
@@ -153,7 +207,7 @@ async function selectKidFriendlyQuestion(playerId: string, sessionId?: string): 
     const totalCat = await prisma.quizQuestion.count({ where: { difficulty, category: cat } });
     if (totalCat === 0) continue;
     const seenCat = await prisma.quizQuestionSeen.findMany({ where: { playerId, question: { difficulty, category: cat } }, select: { questionId: true } });
-    const seenIds = seenCat.map(s => s.questionId);
+  const seenIds = seenCat.map((s: { questionId: string }) => s.questionId);
     const remaining = totalCat - seenIds.length;
     if (remaining <= 0) continue;
     const skip = Math.floor(Math.random() * remaining);
@@ -165,7 +219,7 @@ async function selectKidFriendlyQuestion(playerId: string, sessionId?: string): 
   const totalEasy = await prisma.quizQuestion.count({ where: { difficulty } });
   if (totalEasy === 0) return null;
   const seenAll = await prisma.quizQuestionSeen.findMany({ where: { playerId, question: { difficulty } }, select: { questionId: true } });
-  const seenIdsAll = new Set(seenAll.map(s => s.questionId));
+  const seenIdsAll = new Set(seenAll.map((s: { questionId: string }) => s.questionId));
   const unseenCount = totalEasy - seenAll.length;
   if (unseenCount <= 0) {
     return await selectUnseenQuestion(playerId, difficulty, sessionId);
@@ -174,12 +228,12 @@ async function selectKidFriendlyQuestion(playerId: string, sessionId?: string): 
   const batchSkip = Math.max(0, Math.floor(Math.random() * Math.max(1, unseenCount - batchSize)));
   const candidates = await prisma.quizQuestion.findMany({ where: { difficulty, id: { notIn: Array.from(seenIdsAll) } }, take: batchSize, skip: batchSkip });
   if (candidates.length === 0) return await selectUnseenQuestion(playerId, difficulty, sessionId);
-  const scored = candidates.map(c => {
+  const scored = candidates.map((c: { question: string; optionA?: string; optionB?: string; optionC?: string; optionD?: string }) => {
     const lenQ = (c.question || '').length;
     const maxOpt = Math.max((c.optionA||'').length, (c.optionB||'').length, (c.optionC||'').length, (c.optionD||'').length);
     const score = lenQ + maxOpt * 2; // plus petit = plus simple
     return { c, score };
-  }).sort((a,b) => a.score - b.score);
+  }).sort((a: { c: any; score: number }, b: { c: any; score: number }) => a.score - b.score);
   return scored[0]?.c || candidates[0];
 }
 
@@ -193,7 +247,7 @@ async function selectMediumPreferred(playerId: string, sessionId?: string): Prom
     const totalCat = await prisma.quizQuestion.count({ where: { difficulty, category } });
     if (totalCat === 0) continue;
     const seenCat = await prisma.quizQuestionSeen.findMany({ where: { playerId, question: { difficulty, category } }, select: { questionId: true } });
-    const seenIds = seenCat.map(s => s.questionId);
+  const seenIds = seenCat.map((s: { questionId: string }) => s.questionId);
     const remaining = totalCat - seenIds.length;
     if (remaining <= 0) continue;
     const skip = Math.floor(Math.random() * remaining);
@@ -449,7 +503,7 @@ export async function registerQuizRoutes(app: FastifyInstance) {
     }
   });
 
-  // POST /api/games/:gameId/quiz/timeout - Temps écoulé: compter faux et terminer la session
+  // POST /api/games/:gameId/quiz/timeout - Temps écoulé: si skip dispo -> auto-skip; sinon cash-out des gains
   app.post("/api/games/:gameId/quiz/timeout", { preHandler: requireUserOrGuest(app) }, async (req, reply) => {
     const paramsSchema = z.object({ gameId: z.string() });
     const bodySchema = z.object({ sessionId: z.string(), questionId: z.string() });
@@ -470,35 +524,116 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         return reply.status(404).send({ error: "Question non trouvée" });
       }
 
+      const currentSkips = (session as any).skipsLeft ?? 0;
       const prizeBefore = session.currentEarnings;
-      const prizeAfter = 0;
 
-      // Enregistrer la tentative comme TIMEOUT
+      if (currentSkips > 0) {
+        // AUTO-SKIP: décrémenter le skip, marquer la question, et fournir une nouvelle question même difficulté
+        // Sélectionner la prochaine question (même logique que /skip)
+        const diff = getDifficultyForQuestion(session.currentQuestion);
+        const nextQuestion = session.currentQuestion <= 4
+          ? await selectKidFriendlyQuestion(session.playerId, session.id)
+          : await selectUnseenQuestion(session.playerId, diff, session.id);
+        if (!nextQuestion) {
+          return reply.status(500).send({ error: "Aucune autre question disponible" });
+        }
+
+        try {
+          await prisma.quizSession.update({ where: { id: session.id }, data: { /* @ts-ignore */ skipsLeft: (currentSkips - 1) as any } as any });
+        } catch (e: any) {
+          return reply.status(501).send({ error: "La fonction 'Passer la question' n'est pas encore disponible (mise à jour base de données requise)." });
+        }
+
+        // Marquer la question écoulée comme vue
+        await markQuestionAsSeen(session.playerId, question.id);
+
+        // Enregistrer une tentative TIMEOUT_SKIP (ne change pas les gains)
+        try {
+          await prisma.quizAttempt.create({
+            data: {
+              sessionId: session.id,
+              questionId: question.id,
+              questionNumber: session.currentQuestion,
+              playerAnswer: 'TIMEOUT_SKIP' as any,
+              isCorrect: false,
+              prizeBefore,
+              prizeAfter: prizeBefore,
+            },
+          });
+        } catch {}
+
+        // Marquer la nouvelle question comme vue
+        await markQuestionAsSeen(session.playerId, nextQuestion.id);
+
+        return reply.send({
+          timeout: true,
+          action: 'auto-skip',
+          correctAnswer: question.correctAnswer,
+          session: {
+            id: session.id,
+            currentQuestion: session.currentQuestion,
+            currentEarnings: session.currentEarnings,
+            securedAmount: (session as any).securedAmount ?? 0,
+            skipsLeft: Math.max(0, currentSkips - 1),
+            nextPrize: getPrizeAmount(session.currentQuestion),
+          },
+          question: (() => {
+            const qWithImg = attachImage(session.currentQuestion, nextQuestion);
+            return {
+              id: qWithImg.id,
+              text: qWithImg.question,
+              optionA: qWithImg.optionA,
+              optionB: qWithImg.optionB,
+              optionC: qWithImg.optionC,
+              optionD: qWithImg.optionD,
+              imageUrl: null,
+            };
+          })(),
+        });
+      }
+
+      // Pas de skip restant: CASH-OUT automatique des gains courants
+      const prizeAfter = prizeBefore; // on encaisse ce qui est déjà gagné
+
+      // Enregistrer la tentative TIMEOUT_CASHOUT (ne change pas la valeur)
       try {
         await prisma.quizAttempt.create({
           data: {
             sessionId: session.id,
             questionId: question.id,
             questionNumber: session.currentQuestion,
-            playerAnswer: 'TIMEOUT' as any,
-            isCorrect: false,
+            playerAnswer: 'TIMEOUT_CASHOUT' as any,
+            isCorrect: null as any,
             prizeBefore,
             prizeAfter,
           },
         });
       } catch {}
 
-      // Terminer la session en échec
+      // Marquer la session comme encaissée
       await prisma.quizSession.update({
         where: { id: session.id },
-        data: { status: 'failed', currentEarnings: prizeAfter, completedAt: new Date() },
+        data: { status: 'cashed-out', completedAt: new Date() },
       });
+
+      // Créditer le joueur
+      if (prizeAfter > 0) {
+        await prisma.player.update({
+          where: { id: session.playerId },
+          data: {
+            cash: { increment: prizeAfter },
+            netWorth: { increment: prizeAfter },
+            cumulativeQuizGain: { increment: prizeAfter },
+          },
+        });
+      }
 
       return reply.send({
         timeout: true,
+        action: 'auto-cash-out',
         correctAnswer: question.correctAnswer,
         finalPrize: prizeAfter,
-        message: "Temps écoulé ! La session est terminée.",
+        message: `Temps écoulé ! Vous avez encaissé $${prizeAfter.toLocaleString()} !`,
       });
     } catch (err: any) {
       app.log.error({ err }, "Erreur timeout quiz");
@@ -978,6 +1113,19 @@ export async function registerQuizRoutes(app: FastifyInstance) {
     }
   });
 
+  // POST /api/quiz/cleanup-duplicates - Audit et suppression des doublons (admin)
+  app.post("/api/quiz/cleanup-duplicates", { preHandler: requireAdmin(app) }, async (req, reply) => {
+    const bodySchema = z.object({ threshold: z.number().min(0.5).max(0.95).default(0.8), dryRun: z.boolean().default(true) });
+    const { threshold, dryRun } = bodySchema.parse((req as any).body || {});
+    try {
+      const result = await auditAndCleanupDuplicates(threshold, dryRun);
+      return reply.send({ success: true, dryRun, ...result });
+    } catch (err: any) {
+      app.log.error({ err }, "Erreur cleanup duplicates");
+      return reply.status(500).send({ error: err.message });
+    }
+  });
+
   // GET /api/quiz/public-stats - Statistiques publiques (sans auth)
   app.get("/api/quiz/public-stats", async (req, reply) => {
     try {
@@ -1116,7 +1264,7 @@ export async function registerQuizRoutes(app: FastifyInstance) {
       // Stats avant
       const [totalBefore, usedBefore] = await Promise.all([
         prisma.quizQuestion.count(),
-        prisma.quizAttempt.findMany({ distinct: ["questionId"], select: { questionId: true } }).then(r => r.length),
+  prisma.quizAttempt.findMany({ distinct: ["questionId"], select: { questionId: true } }).then((r: Array<{ questionId: string }>) => r.length),
       ]);
       const remainingBefore = Math.max(0, totalBefore - usedBefore);
 
@@ -1129,7 +1277,7 @@ export async function registerQuizRoutes(app: FastifyInstance) {
       });
       let deleted = 0;
       if (deletable.length > 0) {
-        const ids = deletable.map(d => d.id);
+  const ids = deletable.map((d: { id: string }) => d.id);
         const del = await prisma.quizQuestion.deleteMany({ where: { id: { in: ids } } });
         deleted = del.count;
       }
@@ -1137,7 +1285,7 @@ export async function registerQuizRoutes(app: FastifyInstance) {
       // Stats après
       const [totalAfter, usedAfter] = await Promise.all([
         prisma.quizQuestion.count(),
-        prisma.quizAttempt.findMany({ distinct: ["questionId"], select: { questionId: true } }).then(r => r.length),
+  prisma.quizAttempt.findMany({ distinct: ["questionId"], select: { questionId: true } }).then((r: Array<{ questionId: string }>) => r.length),
       ]);
       const remainingAfter = Math.max(0, totalAfter - usedAfter);
 
