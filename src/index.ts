@@ -76,14 +76,17 @@ async function bootstrap() {
     origin: (origin, cb) => {
       // autoriser requêtes serveur-à-serveur et outils (origin nul)
       if (!origin) return cb(null, true);
-  if (env.CLIENT_ORIGINS.includes(origin)) return cb(null, true);
-  // autoriser tous les déploiements Vercel en preview
-  if (/\.vercel\.app$/.test(origin)) return cb(null, true);
+      if (env.CLIENT_ORIGINS.includes(origin)) return cb(null, true);
+      // autoriser tous les déploiements Vercel en preview
+      if (/\.vercel\.app$/.test(origin)) return cb(null, true);
       // autoriser localhost en dev
       if (origin.startsWith("http://localhost:")) return cb(null, true);
+      // Log refus pour diagnostic en production (CORS)
+      app.log.warn({ origin }, "CORS origin refusé");
       cb(new Error("Origin not allowed"), false);
     },
   });
+  app.log.info({ origins: env.CLIENT_ORIGINS }, "CORS: origines autorisées chargées");
   // Helmet désactivé temporairement (incompatibilité de version avec Fastify v4). À réactiver après MAJ des versions.
   await app.register(rateLimit, { max: 100, timeWindow: '1 minute' });
   await app.register(cookie);

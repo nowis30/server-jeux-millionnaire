@@ -224,6 +224,34 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     }
   });
 
+  // refresh: réémettre un token si il reste <4h avant expiration (basé sur iat)
+  app.get("/api/auth/refresh", async (req, reply) => {
+    try {
+      const authHeader = (req.headers?.["authorization"] as string) || "";
+      const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+      const tokenCookie = (req as any).cookies?.["hm_auth"];
+      const token = bearer || tokenCookie;
+      if (!token) return reply.status(401).send({ error: "Unauthenticated" });
+      const payload = (app as any).jwt.verify(token) as { sub: string; email: string; isAdmin: boolean; iat?: number };
+      const nowSec = Math.floor(Date.now() / 1000);
+      const iat = payload.iat ?? 0;
+      const ageSec = nowSec - iat;
+      const maxAgeSec = 12 * 60 * 60;
+      if (!iat || ageSec > maxAgeSec) return reply.status(401).send({ error: "Unauthenticated" });
+      // Si le token est “jeune” (>8h restantes), ne pas générer inutilement
+      const remaining = maxAgeSec - ageSec;
+      if (remaining > 4 * 60 * 60) {
+        return reply.send({ refreshed: false, remainingSeconds: remaining });
+      }
+      // Émettre un nouveau token 12h
+      const newToken = (app as any).jwt.sign({ sub: payload.sub, email: payload.email, isAdmin: payload.isAdmin }, { expiresIn: "12h" });
+      reply.setCookie("hm_auth", newToken, { path: "/", httpOnly: true, sameSite: "none", secure: true });
+      return reply.send({ refreshed: true, token: newToken });
+    } catch (e) {
+      return reply.status(401).send({ error: "Unauthenticated" });
+    }
+  });
+
   // logout
   app.post("/api/auth/logout", async (_req, reply) => {
     // Important: utiliser les mêmes attributs que lors du setCookie pour garantir la suppression sur tous les navigateurs

@@ -101,6 +101,43 @@ export async function registerPropertyRoutes(app: FastifyInstance) {
     }
   });
 
+  // Refill ciblé: assurer exactement 10 six-plex disponibles (units=6) sans toucher les autres types.
+  // GET ou POST /api/properties/refill/sixplex10
+  async function handleRefillSixplex(req: any, reply: any) {
+    try {
+      // Compter six-plex existants (tous) puis appliquer ensureExactTypeCounts vers 10 si <10
+      const current = await app.prisma.propertyTemplate.count({ where: { units: 6 } });
+      if (current < 10) {
+        const res = await ensureExactTypeCounts({ 6: 10 });
+        return reply.send({ ok: true, before: current, after: 10, created: res[6]?.created ?? 0 });
+      }
+      return reply.send({ ok: true, before: current, after: current, created: 0 });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Erreur refill six-plex";
+      return reply.status(500).send({ error: message });
+    }
+  }
+  app.post("/api/properties/refill/sixplex10", handleRefillSixplex);
+  app.get("/api/properties/refill/sixplex10", handleRefillSixplex);
+
+  // Refill ciblé: assurer exactement 10 tours de 50 logements disponibles (units=50) sans toucher les autres types.
+  // GET ou POST /api/properties/refill/tower50x10
+  async function handleRefillTower50(req: any, reply: any) {
+    try {
+      const current = await app.prisma.propertyTemplate.count({ where: { units: 50 } });
+      if (current < 10) {
+        const res = await ensureExactTypeCounts({ 50: 10 });
+        return reply.send({ ok: true, before: current, after: 10, created: res[50]?.created ?? 0 });
+      }
+      return reply.send({ ok: true, before: current, after: current, created: 0 });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Erreur refill tour 50";
+      return reply.status(500).send({ error: message });
+    }
+  }
+  app.post("/api/properties/refill/tower50x10", handleRefillTower50);
+  app.get("/api/properties/refill/tower50x10", handleRefillTower50);
+
   // Liste des biens (holdings) d'un joueur dans une partie
   app.get("/api/games/:gameId/properties/holdings/:playerId", async (req, reply) => {
     const paramsSchema = z.object({ gameId: z.string(), playerId: z.string() });
