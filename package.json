@@ -18,10 +18,16 @@
     "reset:templates": "tsx scripts/reset_templates.ts",
     "reset:games": "tsx scripts/reset_games.ts",
     "renew:verifications": "tsx scripts/renew_verifications.ts",
-  "test:smoke": "tsx tests/listings.smoke.ts",
-  "test:smoke:market": "tsx tests/market.smoke.ts",
-  "test:smoke:portfolio": "tsx tests/portfolio.smoke.ts",
-  "test:routes:portfolio": "tsx tests/portfolio.routes.test.ts"
+    "test:smoke": "tsx tests/listings.smoke.ts",
+    "test:smoke:market": "tsx tests/market.smoke.ts",
+    "test:smoke:portfolio": "tsx tests/portfolio.smoke.ts",
+    "test:routes:portfolio": "tsx tests/portfolio.routes.test.ts",
+    "test:routes:quiz-timeout": "tsx tests/quiz.timeout.routes.test.ts",
+    "test:routes:pari-tokens": "tsx tests/pari.tokens.routes.test.ts",
+    "test:routes:quiz-adskip": "tsx tests/quiz.adskip.routes.test.ts",
+    "test:routes:immo-cumul": "tsx tests/immobilier.cumulative.routes.test.ts",
+  "test:routes:quiz-prizes": "tsx tests/quiz.prizes.routes.test.ts",
+  "test:all": "npm run test:routes:quiz-timeout && npm run test:routes:pari-tokens && npm run test:routes:quiz-adskip && npm run test:routes:immo-cumul && npm run test:routes:quiz-prizes"
   },
   "dependencies": {
     "@fastify/cookie": "^9.4.0",

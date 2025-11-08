@@ -10,8 +10,8 @@ import {
   getTimeUntilNextToken,
 } from "../services/quizTokens";
 
-// Règle Quitte ou Double: démarrage à 5000$ et double à chaque bonne réponse
-const BASE_STAKE = 5000;
+// Règle Quitte ou Double: démarrage à 50000$ et double à chaque bonne réponse
+const BASE_STAKE = 50000;
 const getPrizeAmount = (questionNumber: number) => BASE_STAKE * Math.pow(2, Math.max(0, questionNumber - 1));
 const getDifficultyForQuestion = (questionNumber: number): 'easy' | 'medium' | 'hard' => {
   // Ordre demandé: 1-4 facile, 5-7 moyen, 8-10 difficile
@@ -75,6 +75,9 @@ function similarity(sigA: ReturnType<typeof quickSignature>, sigB: ReturnType<ty
   const jTri = interTri/unionTri;
   return (jTok*0.6 + jTri*0.4);
 }
+
+// Seuil de similarité maximal autorisé entre une nouvelle question et les récentes
+const SIMILARITY_THRESHOLD = 0.65;
 
 // Maintient un cache des dernières questions posées dans la session pour éviter paraphrases
 async function getRecentSessionQuestions(sessionId: string, limit = 5): Promise<Array<{ id: string; question: string }>> {
@@ -162,15 +165,15 @@ async function selectUnseenQuestion(playerId: string, difficulty: string, sessio
     });
     if (attempt) {
       const sigAttempt = quickSignature(attempt.question);
-      // Refuser si trop similaire (>0.75) à une des récentes
-      const tooClose = recentSigs.some(r => similarity(sigAttempt, r.sig) >= 0.75);
+  // Refuser si trop similaire (>= seuil) à une des récentes
+  const tooClose = recentSigs.some(r => similarity(sigAttempt, r.sig) >= SIMILARITY_THRESHOLD);
       if (tooClose) {
         // Chercher une autre dans la même catégorie (scan linéaire limité)
         const alt = await prisma.quizQuestion.findMany({
           where: { difficulty, category, id: { notIn: Array.from(excludedIdsCat) } },
           take: 10,
         });
-  const picked = alt.find((a: { question: string }) => !recentSigs.some(r => similarity(sigAttempt, quickSignature(a.question)) >= 0.75));
+          const picked = alt.find((a: { question: string }) => !recentSigs.some(r => similarity(sigAttempt, quickSignature(a.question)) >= SIMILARITY_THRESHOLD));
         if (picked) attempt = picked;
       }
       if (attempt) return attempt;
@@ -185,10 +188,10 @@ async function selectUnseenQuestion(playerId: string, difficulty: string, sessio
     const candidate = await prisma.quizQuestion.findFirst({ where: { difficulty, id: { notIn: excludedAll } }, skip });
     if (candidate) {
       const sigCand = quickSignature(candidate.question);
-      if (!recentSigs.some(r => similarity(sigCand, r.sig) >= 0.75)) return candidate;
+  if (!recentSigs.some(r => similarity(sigCand, r.sig) >= SIMILARITY_THRESHOLD)) return candidate;
       // Fallback: chercher autre
       const others = await prisma.quizQuestion.findMany({ where: { difficulty, id: { notIn: excludedAll } }, take: 15 });
-  const alt = others.find((o: { question: string }) => !recentSigs.some(r => similarity(quickSignature(o.question), r.sig) >= 0.75));
+  const alt = others.find((o: { question: string }) => !recentSigs.some(r => similarity(quickSignature(o.question), r.sig) >= SIMILARITY_THRESHOLD));
       if (alt) return alt;
     }
   }
@@ -499,6 +502,49 @@ export async function registerQuizRoutes(app: FastifyInstance) {
 
     } catch (err: any) {
       app.log.error({ err }, "Erreur skip quiz");
+      return reply.status(500).send({ error: err.message });
+    }
+  });
+
+  // POST /api/games/:gameId/quiz/ad-skip - Recharge publicitaire d'un saut (skip) sans perdre la progression
+  app.post("/api/games/:gameId/quiz/ad-skip", { preHandler: requireUserOrGuest(app) }, async (req, reply) => {
+    const paramsSchema = z.object({ gameId: z.string() });
+    const bodySchema = z.object({ sessionId: z.string() });
+    const { gameId } = paramsSchema.parse((req as any).params);
+    const { sessionId } = bodySchema.parse((req as any).body);
+    try {
+  const session = await (prisma as any).quizSession.findUnique({ where: { id: sessionId }, select: { id: true, gameId: true, status: true, skipsLeft: true, lastAdSkipAt: true } });
+      if (!session || session.status !== 'active') {
+        return reply.status(404).send({ error: 'Session non trouvée ou non active' });
+      }
+      if (session.gameId !== gameId) {
+        return reply.status(403).send({ error: 'Session hors de cette partie' });
+      }
+      const MAX_SKIPS = 3;
+      const COOLDOWN_MINUTES = 20; // Une recharge toutes les 20 minutes
+      if (session.lastAdSkipAt) {
+        const diffMin = (Date.now() - new Date(session.lastAdSkipAt).getTime()) / 60000;
+        if (diffMin < COOLDOWN_MINUTES) {
+          const remain = Math.ceil(COOLDOWN_MINUTES - diffMin);
+          return reply.status(429).send({ error: `Recharge skip trop fréquente. Réessayez dans ${remain} min.` });
+        }
+      }
+      // Si le joueur a déjà des skips >0 on peut soit refuser, soit plafonner; ici on autorise uniquement si < MAX_SKIPS
+      if ((session as any).skipsLeft >= MAX_SKIPS) {
+        return reply.status(400).send({ error: 'Nombre de sauts déjà au maximum.' });
+      }
+      const newSkips = Math.min(MAX_SKIPS, (session as any).skipsLeft + 1);
+      await (prisma as any).quizSession.update({
+        where: { id: session.id },
+        data: {
+          skipsLeft: newSkips,
+          adSkipRechargeCount: { increment: 1 } as any,
+          lastAdSkipAt: new Date(),
+        },
+      });
+      return reply.send({ ok: true, sessionId: session.id, skipsLeft: newSkips, message: 'Un saut a été rechargé via annonce.' });
+    } catch (err: any) {
+      app.log.error({ err }, 'Erreur ad-skip');
       return reply.status(500).send({ error: err.message });
     }
   });
