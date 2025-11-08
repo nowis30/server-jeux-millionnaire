@@ -32,7 +32,8 @@ async function main() {
   // Auth inutile pour ce test: on appelle directement le moteur de simulation (hourlyTick)
 
   // Créer un joueur (player) dans la partie directement via Prisma pour simplifier
-  const player = await prisma.player.create({ data: { nickname: 'tester_immo', cash: 1_000_000, netWorth: 1_000_000, gameId, guestId: 'guest-immo' } });
+  const suffix = Math.random().toString(36).slice(2, 8);
+  const player = await prisma.player.create({ data: { nickname: `tester_immo_${suffix}`, cash: 1_000_000, netWorth: 1_000_000, gameId, guestId: `guest-immo-${suffix}` } });
 
   // Créer un template et un holding immobilier initial
   const tpl = await prisma.propertyTemplate.create({ data: { name: 'Test Immeuble', city: 'VilleX', imageUrl: 'x', price: 400000, baseRent: 3000, taxes: 8000, insurance: 1500, maintenance: 5000 } });

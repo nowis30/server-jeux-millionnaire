@@ -40,6 +40,7 @@ function illustrationForType(t: string): string {
   if (key.includes("triplex")) return "/images/props/triplex.svg";
   if (/(quadruplex|4-?plex|fourplex)/i.test(t)) return "/images/props/quadruplex.svg";
   if (/(6-?plex|sixplex|six-?plex)/i.test(t)) return "/images/props/6plex.svg";
+  // Tours 50 ou 100 unités → même illustration tower.svg (peut être spécialisée plus tard)
   if (/(tour|tower|condo)/i.test(t)) return "/images/props/tower.svg";
   if (/(gratte-ciel|skyscraper)/i.test(t)) return "/images/props/skyscraper.svg"; // image existante si fournie, sinon retirée côté client
   if (/(village futuriste|futuriste|village)/i.test(t)) return "/images/village_futuriste.svg";
@@ -168,6 +169,7 @@ export async function ensurePropertyTypeQuotas(minPerType = 5, opts?: { priceMul
     { label: "Triplex", units: 3, rentMin: 900, rentMax: 1400 },
     { label: "6-plex", units: 6, rentMin: 800, rentMax: 1200 },
     { label: "Tour à condos (50 log.)", units: 50, rentMin: 1100, rentMax: 1800 },
+    { label: "Tour résidentielle (100 log.)", units: 100, rentMin: 1000, rentMax: 1700 },
     { label: "Gratte-ciel (400 log.)", units: 400, rentMin: 850, rentMax: 1300 },
     { label: "Village futuriste", units: 800, rentMin: 2500, rentMax: 4000 },
   ];
@@ -194,8 +196,15 @@ export async function ensurePropertyTypeQuotas(minPerType = 5, opts?: { priceMul
       let price: number;
       if (spec.units >= 800) {
         price = 100_000_000_000; // 100 milliards $
+      } else if (spec.units >= 400) {
+        const grm = Math.round(rand(14, 16) * 10) / 10;
+        price = Math.round(annualGross * grm);
+      } else if (spec.units >= 100) {
+        // Tours 100 log : légèrement premium vs 50 log (GRM 13-15)
+        const grm = Math.round(rand(13, 15) * 10) / 10;
+        price = Math.round(annualGross * grm);
       } else {
-        const grm = spec.units >= 400 ? Math.round(rand(14, 16) * 10) / 10 : Math.round(rand(10, 14) * 10) / 10;
+        const grm = Math.round(rand(10, 14) * 10) / 10;
         price = Math.round(annualGross * grm);
       }
       if (opts?.priceMultiplier && opts.priceMultiplier > 0) {
@@ -227,7 +236,7 @@ export async function ensurePropertyTypeQuotas(minPerType = 5, opts?: { priceMul
           electricityState,
           roofState,
           // Champs étages & centre commercial
-          floors: spec.units >= 800 ? 120 : (spec.units >= 400 ? 100 : 1),
+          floors: spec.units >= 800 ? 120 : (spec.units >= 400 ? 100 : (spec.units >= 100 ? 80 : 1)),
           hasCommercialCenter: spec.units >= 400 ? true : false,
         } as any,
       });
@@ -250,13 +259,26 @@ export async function ensureExactTypeCounts(targets: Record<number, number>, opt
     "Sherbrooke", "Saguenay", "Lévis", "Trois-Rivières", "Terrebonne",
     "Repentigny", "Brossard", "Drummondville", "Granby", "Blainville",
   ];
-  const labelOf = (u: number) => u >= 50 ? "Tour à condos (50 log.)" : (u === 6 ? "6-plex" : (u === 3 ? "Triplex" : (u === 2 ? "Duplex" : "Maison")));
+  const labelOf = (u: number) => {
+    if (u === 1) return "Maison";
+    if (u === 2) return "Duplex";
+    if (u === 3) return "Triplex";
+    if (u === 6) return "6-plex";
+    if (u === 50) return "Tour à condos (50 log.)";
+    if (u === 100) return "Tour résidentielle (100 log.)";
+    if (u === 400) return "Gratte-ciel (400 log.)";
+    if (u === 800) return "Village futuriste";
+    return `Immeuble (${u} log.)`;
+  };
   const rentRange: Record<number, { min: number; max: number }> = {
     1: { min: 1200, max: 2200 },
     2: { min: 950, max: 1500 },
     3: { min: 900, max: 1400 },
     6: { min: 800, max: 1200 },
     50: { min: 1100, max: 1800 },
+    100: { min: 1000, max: 1700 },
+    400: { min: 850, max: 1300 },
+    800: { min: 2500, max: 4000 },
   };
 
   const results: Record<string, { before: number; created: number; after: number }> = {};
@@ -272,7 +294,13 @@ export async function ensureExactTypeCounts(targets: Record<number, number>, opt
       const city = cities[(i + created) % cities.length];
       const baseRent = randi(rr.min, rr.max);
       const annualGross = baseRent * units * 12;
-      const grm = Math.round(rand(10, 15) * 10) / 10; // 10.0..15.0
+      let grmBaseMin = 10;
+      let grmBaseMax = 15;
+      if (units === 50) { grmBaseMin = 11; grmBaseMax = 15; }
+      if (units === 100) { grmBaseMin = 13; grmBaseMax = 15; }
+      if (units === 400) { grmBaseMin = 14; grmBaseMax = 16; }
+      if (units === 800) { grmBaseMin = 20; grmBaseMax = 25; }
+      const grm = Math.round(rand(grmBaseMin, grmBaseMax) * 10) / 10;
       let price = Math.round(annualGross * grm);
       if (opts?.priceMultiplier && opts.priceMultiplier > 0) {
         price = Math.round(price * opts.priceMultiplier);
@@ -291,7 +319,7 @@ export async function ensureExactTypeCounts(targets: Record<number, number>, opt
           name,
           city,
           imageUrl,
-          description: `${label} à ${city} · ${units} logement(s). Loyer unitaire ≈ ${baseRent}$/mois.`,
+          description: `${label} à ${city} · ${units} logement(s). Loyer unitaire ≈ ${baseRent}$/mois.` + (units >= 400 && units < 800 ? " Centre commercial inclus." : units >= 800 ? " Habitat autonome haute technologie." : ""),
           price,
           baseRent,
           taxes,
@@ -301,6 +329,8 @@ export async function ensureExactTypeCounts(targets: Record<number, number>, opt
           plumbingState,
           electricityState,
           roofState,
+          floors: units >= 800 ? 120 : (units >= 400 ? 100 : (units >= 100 ? 80 : 1)),
+          hasCommercialCenter: units >= 400 ? true : false,
         } as any,
       });
       created++;

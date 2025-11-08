@@ -58,6 +58,8 @@ export async function registerPropertyRoutes(app: FastifyInstance) {
       if (sixCount < 10) countsNeeded[6] = 10;
       const towerCount = await app.prisma.propertyTemplate.count({ where: { units: 50 } });
       if (towerCount < 10) countsNeeded[50] = 10;
+      const tower100Count = await app.prisma.propertyTemplate.count({ where: { units: 100 } });
+      if (tower100Count < 5) countsNeeded[100] = 5;
       let extraCreated = 0;
       if (Object.keys(countsNeeded).length) {
         const exact = await ensureExactTypeCounts(countsNeeded, { priceMultiplier: inflationIndex });
@@ -137,7 +139,7 @@ export async function registerPropertyRoutes(app: FastifyInstance) {
         return await app.prisma.propertyTemplate.count({ where: purchasedIds.size ? { units, id: { notIn: Array.from(purchasedIds) } } : { units } });
       }
       // Cibles par défaut (peuvent être surchargées via body.targets)
-      const desiredDefault = { 1:5, 2:5, 3:5, 6:5, 50:5 } as Record<number, number>;
+  const desiredDefault = { 1:5, 2:5, 3:5, 6:5, 50:5, 100:5 } as Record<number, number>;
       const body = typeof (req as any).body === 'string' ? JSON.parse((req as any).body) : ((req as any).body || {});
       const incomingTargets = body?.targets as Record<number|string, number> | undefined;
       const desired: Record<number, number> = { ...desiredDefault };
@@ -404,6 +406,38 @@ export async function registerPropertyRoutes(app: FastifyInstance) {
         templateId: body.templateId,
         holdingId: holding.id,
       });
+      // Déclenchement asynchrone: maintenir la banque après l'achat
+      (async () => {
+        try {
+          // Inflation pour ajuster les prix
+          let inflationIndex = 1;
+          try {
+            const g = await (app.prisma as any).game.findUnique({ where: { id: params.gameId }, select: { inflationIndex: true } });
+            inflationIndex = Number(g?.inflationIndex ?? 1) || 1;
+          } catch {}
+          // Exclure les templates déjà achetés dans cette partie
+          const purchased = await app.prisma.propertyHolding.findMany({ where: { gameId: params.gameId }, select: { templateId: true } });
+          const purchasedIds = new Set(purchased.map(p => p.templateId));
+          const desiredDefault: Record<number, number> = { 1:5, 2:5, 3:5, 6:5, 50:5, 100:5 };
+          const deficits: Record<number, number> = {};
+          for (const [uStr, need] of Object.entries(desiredDefault)) {
+            const u = Number(uStr);
+            const avail = await app.prisma.propertyTemplate.count({ where: purchasedIds.size ? { units: u, id: { notIn: Array.from(purchasedIds) } } : { units: u } });
+            if (avail < need) deficits[u] = need - avail;
+          }
+          if (Object.keys(deficits).length) {
+            const targets: Record<number, number> = {};
+            for (const [uStr, need] of Object.entries(desiredDefault)) {
+              const u = Number(uStr);
+              const currentGlobal = await app.prisma.propertyTemplate.count({ where: { units: u } });
+              const deficitLocal = deficits[u] || 0;
+              targets[u] = currentGlobal + deficitLocal;
+            }
+            await ensureExactTypeCounts(targets, { priceMultiplier: inflationIndex });
+          }
+        } catch {}
+      })();
+
       return reply.status(201).send({ holdingId: holding.id });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Erreur d'achat";
