@@ -3,6 +3,7 @@ import { z } from "zod";
 import { purchaseProperty, refinanceProperty, sellProperty } from "../services/property";
 import { ensurePropertyTypeQuotas, seedTemplatesGenerate } from "../services/seeder";
 import { assertGameRunning } from "./util";
+import { requireUserOrGuest } from "./auth";
 
 export async function registerPropertyRoutes(app: FastifyInstance) {
   app.get("/api/properties/templates", async (req, reply) => {
@@ -132,7 +133,7 @@ export async function registerPropertyRoutes(app: FastifyInstance) {
           maintenance: (hh.accumulatedMaintenancePaid ?? 0),
           netCashflow: (hh.accumulatedNetCashflow ?? 0),
         },
-        refinanceEvents: h.refinanceLogs.map(r => ({ at: r.at, amount: r.amount, rate: r.rate })),
+  refinanceEvents: h.refinanceLogs.map((r: any) => ({ at: r.at, amount: r.amount, rate: r.rate })),
       };
       return reply.send({ bilan });
     } catch (err) {
@@ -148,11 +149,11 @@ export async function registerPropertyRoutes(app: FastifyInstance) {
       const { gameId, playerId } = paramsSchema.parse((req as any).params);
       const holdings = await app.prisma.propertyHolding.findMany({ where: { gameId, playerId }, include: { template: true } });
       // Agréger
-      let totalValue = 0;
-      let totalDebt = 0;
-      let weeklyRent = 0;
-      let weeklyPayment = 0;
-      let weeklyFixed = 0;
+  let totalValue = 0;
+  let totalDebt = 0;
+  let weeklyRent = 0;
+  let weeklyPayment = 0;
+  let weeklyFixed = 0;
       let accumulatedNet = 0;
       for (const h of holdings) {
         totalValue += Number(h.currentValue ?? 0);
@@ -174,10 +175,11 @@ export async function registerPropertyRoutes(app: FastifyInstance) {
         weeklyFixed += (taxes + insurance + maintenanceAdj) / 52;
       }
 
-      const monthlyRent = (weeklyRent * 52) / 12;
-      const monthlyDebt = (weeklyPayment * 52) / 12;
-      const monthlyFixed = (weeklyFixed * 52) / 12;
-      const monthlyNet = monthlyRent - monthlyDebt - monthlyFixed;
+  const monthlyRent = (weeklyRent * 52) / 12;
+  const monthlyDebt = (weeklyPayment * 52) / 12;
+  const monthlyFixed = (weeklyFixed * 52) / 12;
+  const monthlyNet = monthlyRent - monthlyDebt - monthlyFixed;
+  const weeklyNet = weeklyRent - weeklyPayment - weeklyFixed;
 
       const player = await app.prisma.player.findUnique({ where: { id: playerId } });
 
@@ -185,6 +187,12 @@ export async function registerPropertyRoutes(app: FastifyInstance) {
         totals: {
           totalValue,
           totalDebt,
+          // Hebdomadaire (tick horaire)
+          weeklyRent,
+          weeklyDebt: weeklyPayment,
+          weeklyFixed,
+          weeklyNet,
+          // Mensuel (affichage)
           monthlyRent,
           monthlyDebt,
           monthlyFixed,
@@ -206,7 +214,7 @@ export async function registerPropertyRoutes(app: FastifyInstance) {
   });
 
   // Rembourser (partiellement ou totalement) la dette hypothécaire d'un holding
-  app.post("/api/games/:gameId/properties/:holdingId/repay", async (req, reply) => {
+  app.post("/api/games/:gameId/properties/:holdingId/repay", { preHandler: requireUserOrGuest(app) }, async (req, reply) => {
     const paramsSchema = z.object({ gameId: z.string(), holdingId: z.string() });
     const bodySchema = z.object({ amount: z.number().min(0) });
     try {
@@ -217,6 +225,19 @@ export async function registerPropertyRoutes(app: FastifyInstance) {
       if (!h) return reply.status(404).send({ error: "Holding introuvable" });
       // Vérifier que le holding appartient à une partie identique
       if (h.gameId !== gameId) return reply.status(400).send({ error: "Mauvaise partie" });
+      // Autorisation: seul le propriétaire du holding peut rembourser
+      const user: any = (req as any).user || {};
+      const playerIdHeader: string | undefined = (req.headers?.["x-player-id"] as string) || undefined;
+      let actorPlayerId: string | null = null;
+      if (playerIdHeader) {
+        actorPlayerId = playerIdHeader;
+      } else if (user.guestId) {
+        const p = await app.prisma.player.findFirst({ where: { gameId, guestId: user.guestId }, select: { id: true } });
+        actorPlayerId = p?.id ?? null;
+      }
+      if (!actorPlayerId || actorPlayerId !== h.playerId) {
+        return reply.status(403).send({ error: "Forbidden" });
+      }
       const player = h.player as any;
       if (!player) return reply.status(400).send({ error: "Joueur introuvable" });
       const payer = await app.prisma.player.findUnique({ where: { id: player.id } });

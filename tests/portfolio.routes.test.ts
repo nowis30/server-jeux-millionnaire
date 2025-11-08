@@ -33,9 +33,9 @@ async function testPortfolioAndRepay() {
   const totalValue = data?.totals?.totalValue;
   if (Math.round(totalValue) < 599999) throw new Error('Total value agrégé incorrect');
 
-  // Repay partial
+  // Repay partial (simulate mobile header X-Player-ID for auth/guest matching)
   const repayAmount = 50_000;
-  const repayRes = await app.inject({ method: 'POST', url: `/api/games/${game.id}/properties/${h1.id}/repay`, payload: { amount: repayAmount } });
+  const repayRes = await app.inject({ method: 'POST', url: `/api/games/${game.id}/properties/${h1.id}/repay`, headers: { 'x-player-id': player.id }, payload: { amount: repayAmount } });
   if (repayRes.statusCode !== 200) throw new Error(`Repay status ${repayRes.statusCode}`);
   const repayJson = repayRes.json();
   if (repayJson.applied !== repayAmount) throw new Error('Montant remboursé incorrect');
@@ -46,7 +46,7 @@ async function testPortfolioAndRepay() {
   if (Math.round(after.mortgageDebt) !== 200000) throw new Error('Réduction dette non appliquée');
 
   // Repay excess (plus que dette restante) -> appliqué max
-  const repayAllRes = await app.inject({ method: 'POST', url: `/api/games/${game.id}/properties/${h1.id}/repay`, payload: { amount: 500000 } });
+  const repayAllRes = await app.inject({ method: 'POST', url: `/api/games/${game.id}/properties/${h1.id}/repay`, headers: { 'x-player-id': player.id }, payload: { amount: 500000 } });
   if (repayAllRes.statusCode !== 200) throw new Error(`Repay total status ${repayAllRes.statusCode}`);
   const repayAllJson = repayAllRes.json();
   if (Math.round(repayAllJson.newDebt) !== 0) throw new Error('Dette devrait être soldée');
