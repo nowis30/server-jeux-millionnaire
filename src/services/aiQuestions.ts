@@ -14,7 +14,7 @@ interface GeneratedQuestion {
   correctAnswer: 'A' | 'B' | 'C' | 'D';
   difficulty: 'easy' | 'medium' | 'hard';
   // Ajout des catégories 'logic' et 'iq' pour questions de raisonnement / QI
-  category: 'finance' | 'economy' | 'real-estate' | 'business' | 'technology' | 'science' | 'history' | 'geography' | 'sports' | 'arts' | 'cinema' | 'music' | 'literature' | 'culture' | 'nature' | 'health' | 'food' | 'general' | 'animals' | 'translation' | 'kids' | 'enfants' | 'quebec' | 'definitions' | 'religions' | 'logic' | 'iq';
+  category: 'finance' | 'economy' | 'real-estate' | 'business' | 'technology' | 'science' | 'history' | 'geography' | 'sports' | 'arts' | 'cinema' | 'music' | 'literature' | 'culture' | 'nature' | 'health' | 'food' | 'general' | 'animals' | 'translation' | 'kids' | 'enfants' | 'quebec' | 'definitions' | 'religions' | 'logic' | 'iq' | 'anatomy';
   imageUrl?: string; // URL optionnelle d'une image illustrant la question
 }
 
@@ -34,7 +34,8 @@ Catégories disponibles:
 - literature: Livres, auteurs, poésie, œuvres classiques
 - culture: Traditions, coutumes, gastronomie, langues
 - nature: Animaux, plantes, environnement, écosystèmes
-- health: Santé, nutrition, bien-être, anatomie
+- health: Santé, nutrition, bien-être, prévention
+- anatomy: Anatomie et physiologie humaine (organes, systèmes, adaptations, vulnérabilités)
 - food: Cuisine, recettes, gastronomie, ingrédients
 - general: Culture générale variée, faits intéressants
 - animals: Zoologie, espèces, habitats, comportements, chaînes alimentaires
@@ -161,7 +162,7 @@ const difficultyPrompts = {
 };
 
 export const allowedCategories = [
-  'finance','economy','real-estate','business','technology','science','history','geography','sports','arts','cinema','music','literature','culture','nature','health','food','general','animals','translation','kids','enfants','quebec','definitions','religions','logic','iq'
+  'finance','economy','real-estate','business','technology','science','history','geography','sports','arts','cinema','music','literature','culture','nature','health','food','general','animals','translation','kids','enfants','quebec','definitions','religions','logic','iq','anatomy'
 ] as const;
 
 const categoryPrompts = {
@@ -170,7 +171,8 @@ const categoryPrompts = {
   'real-estate': "Immobilier, hypothèques, propriétés, loyers, valorisation",
   business: "Entrepreneuriat, management, stratégie d'entreprise, marketing, leadership",
   technology: "Informatique, programmation, gadgets, IA, innovations technologiques",
-  science: "Physique, chimie, biologie, astronomie, découvertes scientifiques",
+  science: "Physique, chimie, biologie générale, astronomie, découvertes scientifiques",
+  anatomy: "Anatomie et physiologie humaine: organes, systèmes (nerveux, musculaire, immunitaire), adaptations, forces (endurance, plasticité) et vulnérabilités (carences, blessures). Toujours factuel et neutre.",
   history: "Histoire mondiale, guerres, révolutions, personnages historiques, civilisations",
   geography: "Pays, capitales, montagnes, océans, continents, villes",
   sports: "Football, basketball, olympiques, records sportifs, athlètes",
@@ -245,6 +247,40 @@ const STATIC_LOGIC_QUESTIONS: GeneratedQuestion[] = [
     correctAnswer: 'B',
     difficulty: 'easy',
     category: 'logic'
+  }
+];
+
+// Fallback statique anatomie si absence de clé OpenAI (quelques exemples neutres)
+const STATIC_ANATOMY_QUESTIONS: GeneratedQuestion[] = [
+  {
+    question: "Quel organe est principalement responsable de la détoxification des substances chimiques dans le sang?",
+    optionA: "Le foie",
+    optionB: "Le rein",
+    optionC: "La rate",
+    optionD: "Le pancréas",
+    correctAnswer: 'A',
+    difficulty: 'easy',
+    category: 'anatomy'
+  },
+  {
+    question: "Quel type de muscle est involontaire et présent dans les parois intestinales?",
+    optionA: "Strié squelettique",
+    optionB: "Strié cardiaque",
+    optionC: "Lisse",
+    optionD: "Élastique",
+    correctAnswer: 'C',
+    difficulty: 'medium',
+    category: 'anatomy'
+  },
+  {
+    question: "Quelle est la principale faiblesse du système immunitaire inné par rapport à l'adaptatif?",
+    optionA: "Réponse lente",
+    optionB: "Absence de mémoire",
+    optionC: "Dépendance aux anticorps",
+    optionD: "Sensibilité aux vitamines",
+    correctAnswer: 'B',
+    difficulty: 'hard',
+    category: 'anatomy'
   }
 ];
 
@@ -403,6 +439,13 @@ export async function generateQuestionsWithAI(
         .slice(0, count)
         .map(q => ({ ...q }));
     }
+    if (category === 'anatomy') {
+      console.warn("[AI] Pas de clé OpenAI – utilisation fallback statique anatomie");
+      return STATIC_ANATOMY_QUESTIONS
+        .filter(q => q.category === 'anatomy')
+        .slice(0, count)
+        .map(q => ({ ...q }));
+    }
     console.warn("[AI] OPENAI_API_KEY non configurée, génération IA désactivée");
     return [];
   }
@@ -483,7 +526,8 @@ export async function generateAndSaveQuestions(): Promise<number> {
       { difficulty: 'easy' as const, category: 'sports' as const, count: 4 },
       { difficulty: 'easy' as const, category: 'cinema' as const, count: 3 },
       { difficulty: 'easy' as const, category: 'music' as const, count: 3 },
-      { difficulty: 'easy' as const, category: 'science' as const, count: 3 },
+  { difficulty: 'easy' as const, category: 'science' as const, count: 3 },
+  { difficulty: 'easy' as const, category: 'anatomy' as const, count: 3 },
   { difficulty: 'easy' as const, category: 'nature' as const, count: 3 },
   { difficulty: 'easy' as const, category: 'animals' as const, count: 3 },
   { difficulty: 'easy' as const, category: 'translation' as const, count: 3 },
@@ -501,7 +545,8 @@ export async function generateAndSaveQuestions(): Promise<number> {
   { difficulty: 'medium' as const, category: 'logic' as const, count: 4 },
   { difficulty: 'medium' as const, category: 'iq' as const, count: 3 },
       { difficulty: 'medium' as const, category: 'history' as const, count: 4 },
-      { difficulty: 'medium' as const, category: 'science' as const, count: 4 },
+  { difficulty: 'medium' as const, category: 'science' as const, count: 4 },
+  { difficulty: 'medium' as const, category: 'anatomy' as const, count: 3 },
       { difficulty: 'medium' as const, category: 'literature' as const, count: 3 },
       { difficulty: 'medium' as const, category: 'geography' as const, count: 3 },
       { difficulty: 'medium' as const, category: 'arts' as const, count: 3 },
@@ -517,7 +562,8 @@ export async function generateAndSaveQuestions(): Promise<number> {
   { difficulty: 'medium' as const, category: 'translation' as const, count: 2 },
       
       // Questions difficiles (accent IQ/Logique pour Q6–Q10)
-      { difficulty: 'hard' as const, category: 'science' as const, count: 4 },
+  { difficulty: 'hard' as const, category: 'science' as const, count: 4 },
+  { difficulty: 'hard' as const, category: 'anatomy' as const, count: 2 },
       { difficulty: 'hard' as const, category: 'history' as const, count: 3 },
       { difficulty: 'hard' as const, category: 'literature' as const, count: 3 },
       { difficulty: 'hard' as const, category: 'technology' as const, count: 2 },
