@@ -141,6 +141,112 @@ export async function registerPropertyRoutes(app: FastifyInstance) {
     }
   });
 
+  // Vue agrégée du portefeuille d'un joueur (totaux + gains cumulés)
+  app.get("/api/games/:gameId/players/:playerId/portfolio", async (req, reply) => {
+    const paramsSchema = z.object({ gameId: z.string(), playerId: z.string() });
+    try {
+      const { gameId, playerId } = paramsSchema.parse((req as any).params);
+      const holdings = await app.prisma.propertyHolding.findMany({ where: { gameId, playerId }, include: { template: true } });
+      // Agréger
+      let totalValue = 0;
+      let totalDebt = 0;
+      let weeklyRent = 0;
+      let weeklyPayment = 0;
+      let weeklyFixed = 0;
+      let accumulatedNet = 0;
+      for (const h of holdings) {
+        totalValue += Number(h.currentValue ?? 0);
+        totalDebt += Number(h.mortgageDebt ?? 0);
+        weeklyRent += Number(h.currentRent ?? 0);
+        weeklyPayment += Number(h.weeklyPayment ?? 0);
+        accumulatedNet += Number(h.accumulatedNetCashflow ?? 0);
+        const t = h.template as any;
+        const maintenanceRaw = Number(t?.maintenance ?? 0) || 0;
+        const states = [t?.plumbingState, t?.electricityState, t?.roofState].map((s: any) => String(s || '').toLowerCase());
+        let mult = 1.0;
+        for (const s of states) {
+          if (s.includes('à rénover') || s.includes('a rénover') || s.includes('rénover')) mult = Math.max(mult, 1.5);
+          else if (s.includes('moyen')) mult = Math.max(mult, 1.25);
+        }
+        const maintenanceAdj = maintenanceRaw * mult;
+        const taxes = Number(t?.taxes ?? 0) || 0;
+        const insurance = Number(t?.insurance ?? 0) || 0;
+        weeklyFixed += (taxes + insurance + maintenanceAdj) / 52;
+      }
+
+      const monthlyRent = (weeklyRent * 52) / 12;
+      const monthlyDebt = (weeklyPayment * 52) / 12;
+      const monthlyFixed = (weeklyFixed * 52) / 12;
+      const monthlyNet = monthlyRent - monthlyDebt - monthlyFixed;
+
+      const player = await app.prisma.player.findUnique({ where: { id: playerId } });
+
+      return reply.send({
+        totals: {
+          totalValue,
+          totalDebt,
+          monthlyRent,
+          monthlyDebt,
+          monthlyFixed,
+          monthlyNet,
+          accumulatedNet,
+          holdingsCount: holdings.length,
+        },
+        playerGains: {
+          cumulativePariGain: player?.cumulativePariGain ?? 0,
+          cumulativeQuizGain: player?.cumulativeQuizGain ?? 0,
+          cumulativeMarketRealized: player?.cumulativeMarketRealized ?? 0,
+          cumulativeMarketDividends: player?.cumulativeMarketDividends ?? 0,
+        },
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Erreur portefeuille";
+      return reply.status(400).send({ error: message });
+    }
+  });
+
+  // Rembourser (partiellement ou totalement) la dette hypothécaire d'un holding
+  app.post("/api/games/:gameId/properties/:holdingId/repay", async (req, reply) => {
+    const paramsSchema = z.object({ gameId: z.string(), holdingId: z.string() });
+    const bodySchema = z.object({ amount: z.number().min(0) });
+    try {
+      const { gameId, holdingId } = paramsSchema.parse((req as any).params);
+      await assertGameRunning(app, gameId);
+      const { amount } = bodySchema.parse((req as any).body);
+      const h = await app.prisma.propertyHolding.findUnique({ where: { id: holdingId }, include: { player: true } });
+      if (!h) return reply.status(404).send({ error: "Holding introuvable" });
+      // Vérifier que le holding appartient à une partie identique
+      if (h.gameId !== gameId) return reply.status(400).send({ error: "Mauvaise partie" });
+      const player = h.player as any;
+      if (!player) return reply.status(400).send({ error: "Joueur introuvable" });
+      const payer = await app.prisma.player.findUnique({ where: { id: player.id } });
+      if (!payer) return reply.status(400).send({ error: "Joueur introuvable" });
+      const currentDebt = Number(h.mortgageDebt ?? 0);
+      const availableCash = Number(payer.cash ?? 0);
+      const toApply = Math.min(amount, availableCash, currentDebt);
+      if (toApply <= 0) return reply.status(400).send({ error: "Fonds insuffisants ou dette nulle" });
+      // Appliquer le remboursement
+      const newDebt = Math.max(0, currentDebt - toApply);
+      await app.prisma.$transaction([
+        app.prisma.propertyHolding.update({ where: { id: holdingId }, data: { mortgageDebt: newDebt } }),
+        app.prisma.player.update({ where: { id: payer.id }, data: { cash: { decrement: toApply } } }),
+      ]);
+      (app as any).io?.to(`game:${gameId}`).emit("event-feed", {
+        type: "property:repay",
+        at: new Date().toISOString(),
+        gameId,
+        holdingId,
+        amount: toApply,
+        playerId: payer.id,
+      });
+      const updatedPlayer = await app.prisma.player.findUnique({ where: { id: payer.id } });
+      return reply.send({ status: "ok", applied: toApply, newDebt, playerCash: updatedPlayer?.cash ?? null });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Erreur de remboursement";
+      return reply.status(400).send({ error: message });
+    }
+  });
+
   // Récupérer le propriétaire (pseudo) d'un template déjà acheté dans une partie
   app.get("/api/games/:gameId/properties/owner/:templateId", async (req, reply) => {
     const paramsSchema = z.object({ gameId: z.string(), templateId: z.string() });

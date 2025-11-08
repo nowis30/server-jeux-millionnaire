@@ -90,6 +90,10 @@ export async function sellAsset({ gameId, playerId, symbol, quantity }: TradeInp
   const proceeds = price * quantity;
   const remaining = holding.quantity - quantity;
 
+  // Calcul P&L réalisé sur la quantité vendue
+  const avgCost = Number(holding.avgPrice ?? 0);
+  const realized = (price - avgCost) * quantity;
+
   await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     await tx.player.update({ where: { id: playerId }, data: { cash: { increment: proceeds } } });
     if (remaining <= 0) {
@@ -100,6 +104,8 @@ export async function sellAsset({ gameId, playerId, symbol, quantity }: TradeInp
         data: { quantity: remaining },
       });
     }
+    // Gains réalisés cumulés (peut être négatif)
+    await tx.player.update({ where: { id: playerId }, data: { cumulativeMarketRealized: { increment: realized } } });
   });
 
   await recalcPlayerNetWorth(gameId, playerId);
@@ -325,7 +331,9 @@ export async function dailyMarketTick(gameId: string) {
         if (amount <= 0) continue;
         await prisma.player.update({ where: { id: h.playerId }, data: { cash: { increment: amount } } });
         // Log DB (pour KPI) — une entrée par joueur et par symbole
-        await (prisma as any).dividendLog.create({ data: { gameId, playerId: h.playerId, symbol, amount } });
+  await (prisma as any).dividendLog.create({ data: { gameId, playerId: h.playerId, symbol, amount } });
+  // Incrémenter dividendes cumulés côté joueur
+  await prisma.player.update({ where: { id: h.playerId }, data: { cumulativeMarketDividends: { increment: amount } } });
         // Agréger pour event-feed plus tard
         const row = totals.get(h.playerId) ?? { amount: 0, details: {} };
         row.amount += amount;

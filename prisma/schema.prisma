@@ -26,6 +26,11 @@ model Player {
   netWorth  Float    @default(1000000)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  // Gains cumulés (tracking portefeuille)
+  cumulativePariGain        Float @default(0) // gains nets (peut être négatif) des paris
+  cumulativeQuizGain        Float @default(0) // gains encaissés via quiz (cash-out ou réussite)
+  cumulativeMarketRealized  Float @default(0) // plus/moins-values réalisées sur ventes marché
+  cumulativeMarketDividends Float @default(0) // dividendes reçus cumulés
   
   // Système de tokens pour le quiz
   quizTokens Int      @default(1) // Nombre de tokens disponibles pour jouer au quiz

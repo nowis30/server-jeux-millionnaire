@@ -786,6 +786,8 @@ export async function registerQuizRoutes(app: FastifyInstance) {
             data: {
               cash: { increment: prizeAfter },
               netWorth: { increment: prizeAfter },
+              // Gains cumulés quiz (ajouter le prix final)
+              cumulativeQuizGain: { increment: prizeAfter },
             },
           });
 
@@ -942,6 +944,7 @@ export async function registerQuizRoutes(app: FastifyInstance) {
           data: {
             cash: { increment: finalPrize },
             netWorth: { increment: finalPrize },
+            cumulativeQuizGain: { increment: finalPrize },
           },
         });
       }
@@ -990,10 +993,10 @@ export async function registerQuizRoutes(app: FastifyInstance) {
 
       // Distinct questions déjà posées globalement
       const [usedTotal, usedEasy, usedMedium, usedHard] = await Promise.all([
-        prisma.quizAttempt.findMany({ distinct: ["questionId"], select: { questionId: true } }).then(r => r.length),
-        prisma.quizAttempt.findMany({ where: { question: { difficulty: 'easy' } }, distinct: ["questionId"], select: { questionId: true } }).then(r => r.length),
-        prisma.quizAttempt.findMany({ where: { question: { difficulty: 'medium' } }, distinct: ["questionId"], select: { questionId: true } }).then(r => r.length),
-        prisma.quizAttempt.findMany({ where: { question: { difficulty: 'hard' } }, distinct: ["questionId"], select: { questionId: true } }).then(r => r.length),
+        prisma.quizAttempt.findMany({ distinct: ["questionId"], select: { questionId: true } }).then((r: Array<{ questionId: string }>) => r.length),
+        prisma.quizAttempt.findMany({ where: { question: { difficulty: 'easy' } }, distinct: ["questionId"], select: { questionId: true } }).then((r: Array<{ questionId: string }>) => r.length),
+        prisma.quizAttempt.findMany({ where: { question: { difficulty: 'medium' } }, distinct: ["questionId"], select: { questionId: true } }).then((r: Array<{ questionId: string }>) => r.length),
+        prisma.quizAttempt.findMany({ where: { question: { difficulty: 'hard' } }, distinct: ["questionId"], select: { questionId: true } }).then((r: Array<{ questionId: string }>) => r.length),
       ]);
 
       const remaining = Math.max(0, total - usedTotal);
@@ -1004,9 +1007,9 @@ export async function registerQuizRoutes(app: FastifyInstance) {
       } as const;
 
       const [usedFinance, usedEconomy, usedRealEstate] = await Promise.all([
-        prisma.quizAttempt.findMany({ where: { question: { category: 'finance' } }, distinct: ["questionId"], select: { questionId: true } }).then(r => r.length),
-        prisma.quizAttempt.findMany({ where: { question: { category: 'economy' } }, distinct: ["questionId"], select: { questionId: true } }).then(r => r.length),
-        prisma.quizAttempt.findMany({ where: { question: { category: 'real-estate' } }, distinct: ["questionId"], select: { questionId: true } }).then(r => r.length),
+        prisma.quizAttempt.findMany({ where: { question: { category: 'finance' } }, distinct: ["questionId"], select: { questionId: true } }).then((r: Array<{ questionId: string }>) => r.length),
+        prisma.quizAttempt.findMany({ where: { question: { category: 'economy' } }, distinct: ["questionId"], select: { questionId: true } }).then((r: Array<{ questionId: string }>) => r.length),
+        prisma.quizAttempt.findMany({ where: { question: { category: 'real-estate' } }, distinct: ["questionId"], select: { questionId: true } }).then((r: Array<{ questionId: string }>) => r.length),
       ]);
       const remainingByCategory = {
         finance: Math.max(0, finance - usedFinance),
@@ -1020,7 +1023,7 @@ export async function registerQuizRoutes(app: FastifyInstance) {
       for (const c of distinctCats) {
         const cat = c.category || 'uncategorized';
         const t = await prisma.quizQuestion.count({ where: { category: cat } });
-        const u = await prisma.quizAttempt.findMany({ where: { question: { category: cat } }, distinct: ["questionId"], select: { questionId: true } }).then(r => r.length);
+  const u = await prisma.quizAttempt.findMany({ where: { question: { category: cat } }, distinct: ["questionId"], select: { questionId: true } }).then((r: Array<{ questionId: string }>) => r.length);
         categories.push({ category: cat, total: t, used: u, remaining: Math.max(0, t - u) });
       }
 

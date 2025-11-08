@@ -92,6 +92,11 @@ export async function registerPariRoutes(app: FastifyInstance) {
       gain = bet * outcome.multiplier;
       await prisma.player.update({ where: { id: player.id }, data: { cash: { increment: gain }, netWorth: { increment: gain } } });
     }
+    // Mettre à jour le cumul des gains de pari (gain - mise) => net
+    const net = gain - bet;
+    try {
+      await prisma.player.update({ where: { id: player.id }, data: { cumulativePariGain: { increment: net } } as any });
+    } catch {}
 
     return reply.send({
       dice,

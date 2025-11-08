@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: heritier
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres" 
+          --health-interval 10s 
+          --health-timeout 5s 
+          --health-retries 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Prisma generate
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/heritier
+        run: npx prisma generate
+
+      - name: Prisma migrate deploy
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/heritier
+        run: npx prisma migrate deploy
+
+      - name: Build
+        run: npm run build
+
+      - name: Run smoke and route tests
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/heritier
+        run: |
+          npm run test:smoke
+          npm run test:smoke:market
+          npm run test:smoke:portfolio
+          npm run test:routes:portfolio

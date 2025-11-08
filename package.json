@@ -18,8 +18,10 @@
     "reset:templates": "tsx scripts/reset_templates.ts",
     "reset:games": "tsx scripts/reset_games.ts",
     "renew:verifications": "tsx scripts/renew_verifications.ts",
-    "test:smoke": "tsx tests/listings.smoke.ts",
-    "test:smoke:market": "tsx tests/market.smoke.ts"
+  "test:smoke": "tsx tests/listings.smoke.ts",
+  "test:smoke:market": "tsx tests/market.smoke.ts",
+  "test:smoke:portfolio": "tsx tests/portfolio.smoke.ts",
+  "test:routes:portfolio": "tsx tests/portfolio.routes.test.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^9.4.0",
