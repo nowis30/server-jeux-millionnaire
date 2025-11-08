@@ -109,6 +109,10 @@ model PropertyHolding {
   game         Game     @relation(fields: [gameId], references: [id])
   gameId       String
   purchasePrice Float
+  // Mise de fonds au moment de l'achat (pour bilan)
+  downPayment   Float   @default(0)
+  // Dette initiale contractée à l'achat (purchasePrice - downPayment)
+  initialMortgageDebt Float @default(0)
   currentValue  Float
   currentRent   Float
   mortgageRate  Float   @default(0.05)
@@ -116,6 +120,13 @@ model PropertyHolding {
   weeklyPayment Float   @default(0)
   weeksElapsed  Int     @default(0)
   termYears     Int     @default(25)
+  // Suivis cumulés depuis l'achat
+  accumulatedRent            Float @default(0)
+  accumulatedInterestPaid    Float @default(0)
+  accumulatedTaxesPaid       Float @default(0)
+  accumulatedInsurancePaid   Float @default(0)
+  accumulatedMaintenancePaid Float @default(0)
+  accumulatedNetCashflow     Float @default(0)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

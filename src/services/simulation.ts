@@ -54,23 +54,46 @@ export async function hourlyTick(gameId: string) {
   for (const p of game.players) {
     // loyers - dépenses - paiements hypothécaires + rendements de marché
     let delta = 0;
+    // Recalcule weeklyFactor local pour appliquer à la valeur des holdings
+    const inflAnnualLocal = Number((game as any).inflationAnnual ?? 0.02);
+    const weeklyFactorLocal = Math.pow(1 + inflAnnualLocal, 1 / 52);
     for (const h of p.properties) {
       const rent = h.currentRent;
       const weeklyDebtPayment = h.weeklyPayment ?? 0;
-      const fixedWeekly = (h.template.taxes + h.template.insurance + h.template.maintenance) / ANNUAL_WEEKS;
-      const expenses = weeklyDebtPayment + fixedWeekly;
-      delta += rent - expenses;
-      // Amortissement: réduire la dette de la portion capital du paiement hebdo
+      const fixedWeeklyTaxes = h.template.taxes / ANNUAL_WEEKS;
+      const fixedWeeklyInsurance = h.template.insurance / ANNUAL_WEEKS;
+      const fixedWeeklyMaint = h.template.maintenance / ANNUAL_WEEKS;
+      const fixedWeekly = fixedWeeklyTaxes + fixedWeeklyInsurance + fixedWeeklyMaint;
       const weeklyRate = (h.mortgageRate ?? 0) / ANNUAL_WEEKS;
+      let interest = 0;
+      let principalPaid = 0;
       if (weeklyDebtPayment > 0 && h.mortgageDebt > 0 && weeklyRate >= 0) {
-        const interest = h.mortgageDebt * weeklyRate;
-        const principalPaid = Math.max(0, weeklyDebtPayment - interest);
-        if (principalPaid > 0) {
-          const newDebt = Math.max(0, h.mortgageDebt - principalPaid);
-          // Incrémente weeksElapsed
-          await prisma.propertyHolding.update({ where: { id: h.id }, data: { mortgageDebt: newDebt, /* @ts-ignore new after migration */ weeksElapsed: { increment: 1 } as any } as any });
-        }
+        interest = h.mortgageDebt * weeklyRate;
+        principalPaid = Math.max(0, weeklyDebtPayment - interest);
       }
+      const expenses = weeklyDebtPayment + fixedWeekly;
+      const net = rent - expenses;
+      delta += net;
+
+      // Mise à jour cumulés
+      const updateData: any = {
+        accumulatedRent: { increment: rent },
+        accumulatedInterestPaid: { increment: interest },
+        accumulatedTaxesPaid: { increment: fixedWeeklyTaxes },
+        accumulatedInsurancePaid: { increment: fixedWeeklyInsurance },
+        accumulatedMaintenancePaid: { increment: fixedWeeklyMaint },
+        accumulatedNetCashflow: { increment: net },
+        // Valeur indexée par l'inflation hebdomadaire (en plus de l'appréciation annuelle)
+        currentValue: Math.max(0, h.currentValue * weeklyFactorLocal),
+      };
+
+      if (principalPaid > 0) {
+        const newDebt = Math.max(0, h.mortgageDebt - principalPaid);
+        updateData.mortgageDebt = newDebt;
+        updateData.weeksElapsed = { increment: 1 } as any;
+      }
+
+      await (prisma as any).propertyHolding.update({ where: { id: h.id }, data: updateData });
     }
 
     // Rendements boursiers: variation de la valeur de portefeuille -> ajuster cash proportionnellement (simplifié)

@@ -150,6 +150,35 @@ export async function registerGameRoutes(app: FastifyInstance) {
     return reply.send({ playerId, gameId: id, code: game.code });
   });
 
+  // Réinitialisation douce: remet le cash/netWorth des joueurs, efface l'historique (listings, ticks, logs) mais conserve les joueurs et le game
+  app.post("/api/games/:id/reset-soft", { preHandler: requireAdmin(app) }, async (req, reply) => {
+    const paramsSchema = z.object({ id: z.string() });
+    const { id } = paramsSchema.parse((req as any).params);
+    try {
+      const steps: string[] = [];
+      // Effacer éléments historiques
+      const r1 = await prisma.listing.deleteMany({ where: { gameId: id } }); steps.push(`listings: ${r1.count}`);
+      const r2 = await prisma.dividendLog.deleteMany({ where: { gameId: id } }); steps.push(`dividendLogs: ${r2.count}`);
+      const r3 = await prisma.marketTick.deleteMany({ where: { gameId: id } }); steps.push(`marketTicks: ${r3.count}`);
+      const r4 = await prisma.repairEvent.deleteMany({ where: { holding: { gameId: id } } }); steps.push(`repairEvents: ${r4.count}`);
+      const r5 = await prisma.refinanceLog.deleteMany({ where: { holding: { gameId: id } } }); steps.push(`refinanceLogs: ${r5.count}`);
+      // Supprimer holdings immobiliers et marchés
+      const r6 = await prisma.propertyHolding.deleteMany({ where: { gameId: id } }); steps.push(`propertyHoldings: ${r6.count}`);
+      const r7 = await prisma.marketHolding.deleteMany({ where: { gameId: id } }); steps.push(`marketHoldings: ${r7.count}`);
+      // Remettre les joueurs à l'état initial
+      const players = await prisma.player.findMany({ where: { gameId: id } });
+      for (const p of players) {
+        await prisma.player.update({ where: { id: p.id }, data: { cash: INITIAL_CASH, netWorth: INITIAL_CASH } });
+      }
+      // Réinitialiser paramètres économiques courants (status running, repart à maintenant)
+      // Inflation reste telle quelle (partie continue) – si tu veux reset inflation aussi, on peut le faire ici
+      await prisma.game.update({ where: { id }, data: { status: "running", startedAt: new Date() } });
+      return reply.send({ ok: true, gameId: id, steps });
+    } catch (err: any) {
+      return reply.status(500).send({ error: err.message });
+    }
+  });
+
   // Rejoindre par code en liant le joueur au cookie invité
   app.post("/api/games/code/:code/join", { preHandler: requireUser(app) }, async (req, reply) => {
     const paramsSchema = z.object({ code: z.string() });
@@ -297,12 +326,24 @@ export async function registerGameRoutes(app: FastifyInstance) {
         
         app.log.info({ gameId: id }, "Suppression marketTicks...");
         await tx.marketTick.deleteMany({ where: { gameId: id } });
+
+        // Supprimer sessions quiz, attempts et vues de questions pour un reset complet
+        app.log.info({ gameId: id }, "Suppression quizSessions...");
+        await tx.quizSession.deleteMany({ where: { gameId: id } });
+        app.log.info({ gameId: id }, "Suppression quizQuestionSeen...");
+        await tx.quizQuestionSeen.deleteMany({ where: { player: { gameId: id } } });
+        app.log.info({ gameId: id }, "Suppression quizAttempts...");
+        await tx.quizAttempt.deleteMany({ where: { session: { gameId: id } } });
+        // Supprimer invitations de parrainage
+        app.log.info({ gameId: id }, "Suppression referralInvites...");
+        await tx.referralInvite.deleteMany({ where: { gameId: id } });
         
         app.log.info({ gameId: id }, "Suppression players...");
         await tx.player.deleteMany({ where: { gameId: id } });
         
         app.log.info({ gameId: id }, "Mise à jour game status...");
-        await tx.game.update({ where: { id }, data: { status: "running", startedAt: new Date() } });
+        const infl = 0.01 + Math.random() * 0.04; // nouveau cycle inflation 1%..5%
+        await tx.game.update({ where: { id }, data: { status: "running", startedAt: new Date(), inflationAnnual: infl, inflationIndex: 1 } as any });
       });
       
       (app as any).io?.emit("lobby-update", { type: "restarted", gameId: id });

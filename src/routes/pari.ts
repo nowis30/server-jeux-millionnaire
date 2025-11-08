@@ -71,10 +71,11 @@ export async function registerPariRoutes(app: FastifyInstance) {
     }
     if (!player) return reply.status(404).send({ error: 'Joueur non trouvé' });
 
-    // Plafond dynamique: 50% du cash disponible (plafonné à 1G), jamais sous le minimum
-    const dynamicCap = Math.min(1_000_000_000, Math.max(MIN_BET, Math.floor(Math.max(0, player.cash) * 0.5)));
+    // Plafond dynamique: 50% du cash disponible mais jamais > 50 000 (cap absolu), ni sous le minimum
+    const ABS_MAX = 50_000;
+    const dynamicCap = Math.min(ABS_MAX, Math.max(MIN_BET, Math.floor(Math.max(0, player.cash) * 0.5)));
     if (bet > dynamicCap) {
-      return reply.status(400).send({ error: `Mise trop élevée (plafond dynamique ${dynamicCap})` });
+      return reply.status(400).send({ error: `Mise trop élevée (max ${dynamicCap} / cap absolu 50K)` });
     }
 
     if (player.cash < bet) {

@@ -101,6 +101,46 @@ export async function registerPropertyRoutes(app: FastifyInstance) {
     return reply.send({ holdings });
   });
 
+  // Bilan détaillé d'un holding (cashflows cumulés)
+  app.get("/api/games/:gameId/properties/bilan/:holdingId", async (req, reply) => {
+    const paramsSchema = z.object({ gameId: z.string(), holdingId: z.string() });
+    try {
+      const { gameId, holdingId } = paramsSchema.parse((req as any).params);
+      const h = await app.prisma.propertyHolding.findFirst({
+        where: { id: holdingId, gameId },
+        include: { template: true, refinanceLogs: true },
+      });
+      if (!h) return reply.status(404).send({ error: "Holding introuvable" });
+      const hh: any = h as any;
+      const bilan = {
+        holdingId: h.id,
+        templateName: h.template.name,
+        purchasePrice: h.purchasePrice,
+        downPayment: hh.downPayment ?? null,
+        initialMortgageDebt: hh.initialMortgageDebt ?? null,
+        currentMortgageDebt: h.mortgageDebt,
+        mortgageRate: h.mortgageRate,
+        termYears: (hh.termYears ?? 25),
+        weeksElapsed: (hh.weeksElapsed ?? 0),
+        currentValue: h.currentValue,
+        currentRent: h.currentRent,
+        accumulated: {
+          rent: (hh.accumulatedRent ?? 0),
+          interest: (hh.accumulatedInterestPaid ?? 0),
+          taxes: (hh.accumulatedTaxesPaid ?? 0),
+          insurance: (hh.accumulatedInsurancePaid ?? 0),
+          maintenance: (hh.accumulatedMaintenancePaid ?? 0),
+          netCashflow: (hh.accumulatedNetCashflow ?? 0),
+        },
+        refinanceEvents: h.refinanceLogs.map(r => ({ at: r.at, amount: r.amount, rate: r.rate })),
+      };
+      return reply.send({ bilan });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Erreur bilan";
+      return reply.status(400).send({ error: message });
+    }
+  });
+
   // Récupérer le propriétaire (pseudo) d'un template déjà acheté dans une partie
   app.get("/api/games/:gameId/properties/owner/:templateId", async (req, reply) => {
     const paramsSchema = z.object({ gameId: z.string(), templateId: z.string() });

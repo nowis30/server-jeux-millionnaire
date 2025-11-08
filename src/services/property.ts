@@ -54,7 +54,8 @@ export async function purchaseProperty({
       await tx.player.update({ where: { id: playerId }, data: { cash: { decrement: downPayment } } });
     }
 
-    return tx.propertyHolding.create({
+    // Cast 'as any' temporaire tant que prisma generate échoue sur l'environnement (OneDrive lock)
+    return (tx as any).propertyHolding.create({
       data: {
         playerId,
         gameId,
@@ -65,11 +66,11 @@ export async function purchaseProperty({
         mortgageRate,
         mortgageDebt: mortgagePrincipal,
         weeklyPayment,
-        // @ts-ignore: champ ajouté après migration prisma
         termYears: term,
-        // @ts-ignore: champ ajouté après migration prisma
         weeksElapsed: 0,
-      },
+        downPayment,
+        initialMortgageDebt: mortgagePrincipal,
+      } as any,
     });
   });
 
