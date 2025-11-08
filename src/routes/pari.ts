@@ -1,6 +1,7 @@
 import { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { prisma } from "../prisma";
+import { updatePariTokens, consumePariToken, getPariSecondsUntilNext, PARI_MAX_TOKENS } from "../services/pariTokens";
 import { requireUserOrGuest } from "./auth";
 
 /**
@@ -45,6 +46,23 @@ function evaluateDice([a,b,c]: [number,number,number]): Outcome {
 }
 
 export async function registerPariRoutes(app: FastifyInstance) {
+  // Statut tokens Pari
+  app.get('/api/games/:gameId/pari/status', { preHandler: requireUserOrGuest(app) }, async (req, reply) => {
+    const paramsSchema = z.object({ gameId: z.string() });
+    const { gameId } = paramsSchema.parse((req as any).params);
+    const user = (req as any).user;
+    const playerIdHeader = req.headers['x-player-id'] as string | undefined;
+    const playerIdFromMiddleware = user.playerIdFromHeader as string | undefined;
+    let player: any = null;
+    if (playerIdHeader) player = await prisma.player.findFirst({ where: { id: playerIdHeader, gameId } });
+    else if (playerIdFromMiddleware) player = await prisma.player.findFirst({ where: { id: playerIdFromMiddleware, gameId } });
+    else if (user.guestId) player = await prisma.player.findFirst({ where: { gameId, guestId: user.guestId } });
+    if (!player) return reply.status(404).send({ error: 'Joueur non trouvé' });
+    const tokens = await updatePariTokens(player.id);
+    const secondsUntilNext = await getPariSecondsUntilNext(player.id);
+    return reply.send({ tokens, max: PARI_MAX_TOKENS, secondsUntilNext, canPlay: tokens > 0 });
+  });
+
   // POST /api/games/:gameId/pari/play  { bet }
   app.post('/api/games/:gameId/pari/play', { preHandler: requireUserOrGuest(app) }, async (req, reply) => {
     const paramsSchema = z.object({ gameId: z.string() });
@@ -82,6 +100,12 @@ export async function registerPariRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: 'Cash insuffisant' });
     }
 
+    // Consommer 1 token Pari (après mise à jour accumulation)
+    const tokenOk = await consumePariToken(player.id);
+    if (!tokenOk) {
+      return reply.status(403).send({ error: 'Pas assez de tokens Pari (🎟️). Attendez la régénération ou regardez une annonce pour recharger.' });
+    }
+
     // Débiter la mise immédiatement
     await prisma.player.update({ where: { id: player.id }, data: { cash: { decrement: bet }, netWorth: { decrement: bet } } });
 
@@ -98,6 +122,7 @@ export async function registerPariRoutes(app: FastifyInstance) {
       await prisma.player.update({ where: { id: player.id }, data: { cumulativePariGain: { increment: net } } as any });
     } catch {}
 
+  const remainingTokens = (await (prisma as any).player.findUnique({ where: { id: player.id }, select: { pariTokens: true } }))?.pariTokens ?? 0;
     return reply.send({
       dice,
       combination: outcome.type,
@@ -106,6 +131,50 @@ export async function registerPariRoutes(app: FastifyInstance) {
       gain,
       netResult: gain - bet, // positif si gagnant, négatif si perdu
       finalCash: (await prisma.player.findUnique({ where: { id: player.id }, select: { cash: true } }))?.cash,
+      tokensLeft: remainingTokens,
     });
+  });
+
+  // POST /api/games/:gameId/pari/ad-recharge - Recharge complète via annonce (Pari -> 100, Quiz -> 20)
+  app.post('/api/games/:gameId/pari/ad-recharge', { preHandler: requireUserOrGuest(app) }, async (req, reply) => {
+    const paramsSchema = z.object({ gameId: z.string() });
+    const bodySchema = z.object({ type: z.enum(['pari','quiz']) });
+    const { gameId } = paramsSchema.parse((req as any).params);
+    const { type } = bodySchema.parse((req as any).body);
+    const user = (req as any).user;
+    const playerIdHeader = req.headers['x-player-id'] as string | undefined;
+    const playerIdFromMiddleware = user.playerIdFromHeader as string | undefined;
+    let player: any = null;
+    if (playerIdHeader) player = await prisma.player.findFirst({ where: { id: playerIdHeader, gameId } });
+    else if (playerIdFromMiddleware) player = await prisma.player.findFirst({ where: { id: playerIdFromMiddleware, gameId } });
+    else if (user.guestId) player = await prisma.player.findFirst({ where: { gameId, guestId: user.guestId } });
+    if (!player) return reply.status(404).send({ error: 'Joueur non trouvé' });
+
+    const NOW = new Date();
+    const COOLDOWN_MINUTES = 30; // recharge annonce toutes les 30 min max
+    if (type === 'pari') {
+      if (player.lastAdPariAt) {
+        const diffMin = (NOW.getTime() - new Date(player.lastAdPariAt).getTime()) / 60000;
+        if (diffMin < COOLDOWN_MINUTES) {
+          const remain = Math.ceil(COOLDOWN_MINUTES - diffMin);
+          return reply.status(429).send({ error: `Recharge Pari trop fréquente. Réessayez dans ${remain} min.` });
+        }
+      }
+      await (prisma as any).player.update({ where: { id: player.id }, data: { pariTokens: PARI_MAX_TOKENS, lastAdPariAt: NOW, pariTokensUpdatedAt: NOW } });
+      const after = await (prisma as any).player.findUnique({ where: { id: player.id }, select: { pariTokens: true } });
+      return reply.send({ ok: true, type: 'pari', tokens: after?.pariTokens ?? PARI_MAX_TOKENS, max: PARI_MAX_TOKENS, message: 'Recharge Pari 100 tokens effectuée ✅' });
+    } else {
+      if (player.lastAdQuizAt) {
+        const diffMin = (NOW.getTime() - new Date(player.lastAdQuizAt).getTime()) / 60000;
+        if (diffMin < COOLDOWN_MINUTES) {
+          const remain = Math.ceil(COOLDOWN_MINUTES - diffMin);
+          return reply.status(429).send({ error: `Recharge Quiz trop fréquente. Réessayez dans ${remain} min.` });
+        }
+      }
+      const MAX_QUIZ = 20;
+      await (prisma as any).player.update({ where: { id: player.id }, data: { quizTokens: MAX_QUIZ, lastAdQuizAt: NOW, lastTokenEarnedAt: NOW } });
+      const afterQ = await prisma.player.findUnique({ where: { id: player.id }, select: { quizTokens: true } });
+      return reply.send({ ok: true, type: 'quiz', tokens: afterQ?.quizTokens ?? MAX_QUIZ, max: MAX_QUIZ, message: 'Recharge Quiz 20 tokens effectuée ✅' });
+    }
   });
 }

@@ -36,6 +36,13 @@ model Player {
   quizTokens Int      @default(1) // Nombre de tokens disponibles pour jouer au quiz
   lastTokenEarnedAt DateTime @default(now()) // Dernière fois qu'un token a été gagné
 
+  // Système de tokens pour PARI (dés)
+  pariTokens Int @default(0)
+  pariTokensUpdatedAt DateTime @default(now()) // Dernière mise à jour d'accumulation (+5/h)
+  // Recharges par annonce (anti-abus)
+  lastAdPariAt DateTime?
+  lastAdQuizAt DateTime?
+
   game   Game?   @relation(fields: [gameId], references: [id])
   gameId String?
 
@@ -287,6 +294,9 @@ model QuizSession {
   skipsLeft       Int      @default(3)
   startedAt       DateTime @default(now())
   completedAt     DateTime?
+  // Recharges publicitaires pour récupérer des sauts
+  adSkipRechargeCount Int @default(0)
+  lastAdSkipAt DateTime?
   
   attempts        QuizAttempt[]
   

@@ -169,6 +169,39 @@ export async function registerAuthRoutes(app: FastifyInstance) {
   app.post("/api/admin/seed-templates", handleSeedTemplates);
   app.get("/api/admin/seed-templates", handleSeedTemplates);
 
+  // Endpoint admin: promouvoir un utilisateur en administrateur (ajoute isAdmin=true)
+  // Usage: POST /api/auth/admin/promote { email, secret }
+  // Sécurité: nécessite ADMIN_VERIFY_SECRET pour éviter une élévation arbitraire
+  app.post("/api/auth/admin/promote", async (req, reply) => {
+    const body = (req as any).body ?? {};
+    const email = String(body.email || "").toLowerCase().trim();
+    const secret = String(body.secret || "").trim();
+    if (!env.ADMIN_VERIFY_SECRET || secret !== env.ADMIN_VERIFY_SECRET) {
+      return reply.status(403).send({ error: "Forbidden" });
+    }
+    if (!email) return reply.status(400).send({ error: "Email requis" });
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) return reply.status(404).send({ error: "Utilisateur introuvable" });
+    if (user.isAdmin) return reply.send({ ok: true, alreadyAdmin: true });
+    await prisma.user.update({ where: { id: user.id }, data: { isAdmin: true } });
+    return reply.send({ ok: true, promoted: email });
+  });
+
+  // Endpoint de debug: décoder le token courant et renvoyer son payload (sans vérifier isAdmin)
+  app.get("/api/auth/debug-token", async (req, reply) => {
+    try {
+      const authHeader = (req.headers?.["authorization"] as string) || "";
+      const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+      const tokenCookie = (req as any).cookies?.["hm_auth"];
+      const token = bearer || tokenCookie;
+      if (!token) return reply.status(401).send({ error: "Unauthenticated" });
+      const payload = (app as any).jwt.verify(token);
+      return reply.send({ payload });
+    } catch (e: any) {
+      return reply.status(400).send({ error: "Token invalide", details: e.message });
+    }
+  });
+
   // me
   app.get("/api/auth/me", async (req, reply) => {
     try {

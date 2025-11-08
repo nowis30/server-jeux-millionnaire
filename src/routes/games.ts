@@ -7,6 +7,7 @@ import { customAlphabet } from "nanoid";
 import { requireAdmin, requireUser } from "./auth";
 import { cleanupMarketTicks } from "../services/tickCleanup";
 import { getOnlineCount, getOnlineUsers } from "../socket";
+import { hourlyTick } from "../services/simulation";
 
 const codeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const codeGenerator = customAlphabet(codeAlphabet, 6);
@@ -227,6 +228,31 @@ export async function registerGameRoutes(app: FastifyInstance) {
     const game = await prisma.game.update({ where: { id }, data: { status: "running", startedAt: new Date() } });
     (app as any).io?.emit("lobby-update", { type: "started", gameId: game.id });
     return reply.send({ id: game.id, status: game.status });
+  });
+
+  // Avancer la partie d'un certain nombre de semaines (1 tick = 1 semaine de jeu)
+  // Usage: POST /api/games/:id/advance-weeks?weeks=4  (admin uniquement)
+  // Limite de sécurité: max 520 semaines (~10 ans de jeu) par appel
+  app.post("/api/games/:id/advance-weeks", { preHandler: requireAdmin(app) }, async (req, reply) => {
+    const paramsSchema = z.object({ id: z.string() });
+    const querySchema = z.object({ weeks: z.coerce.number().min(1).max(520).default(4) });
+    try {
+      const { id } = paramsSchema.parse((req as any).params);
+      const { weeks } = querySchema.parse((req as any).query ?? {});
+      const game = await prisma.game.findUnique({ where: { id }, select: { id: true, status: true } });
+      if (!game) return reply.status(404).send({ error: "Game introuvable" });
+      if (game.status !== "running") return reply.status(409).send({ error: "La partie n'est pas en cours" });
+
+      const started = Date.now();
+      for (let i = 0; i < weeks; i++) {
+        await hourlyTick(id);
+      }
+      const ms = Date.now() - started;
+      return reply.send({ ok: true, gameId: id, weeksApplied: weeks, durationMs: ms });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Erreur avance semaines";
+      return reply.status(400).send({ error: message });
+    }
   });
 
   // Endpoint temporaire: restart sans transaction (contourne les problèmes de timeout)
