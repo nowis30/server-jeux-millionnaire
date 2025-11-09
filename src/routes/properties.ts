@@ -138,6 +138,45 @@ export async function registerPropertyRoutes(app: FastifyInstance) {
   app.post("/api/properties/refill/tower50x10", handleRefillTower50);
   app.get("/api/properties/refill/tower50x10", handleRefillTower50);
 
+  // Refill ciblé: assurer exactement 5 tours de 100 logements (units=100)
+  // GET ou POST /api/properties/refill/tower100x5
+  async function handleRefillTower100(req: any, reply: any) {
+    try {
+      const current = await app.prisma.propertyTemplate.count({ where: { units: 100 } });
+      if (current < 5) {
+        const res = await ensureExactTypeCounts({ 100: 5 });
+        return reply.send({ ok: true, before: current, after: 5, created: res[100]?.created ?? 0 });
+      }
+      return reply.send({ ok: true, before: current, after: current, created: 0 });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Erreur refill tour 100";
+      return reply.status(500).send({ error: message });
+    }
+  }
+  app.post("/api/properties/refill/tower100x5", handleRefillTower100);
+  app.get("/api/properties/refill/tower100x5", handleRefillTower100);
+
+  // Refill incrémental générique: ajoute +10 au stock global d'un type (units param)
+  // GET ou POST /api/properties/refill/units/:units/plus10
+  async function handleRefillPlus10(req: any, reply: any) {
+    try {
+      const paramsSchema = z.object({ units: z.coerce.number().min(1) });
+      const { units } = paramsSchema.parse((req as any).params);
+      // Limiter aux types stratégiques connus pour éviter pollution: 1,2,3,6,50,100
+      const allowed = new Set([1,2,3,6,50,100]);
+      if (!allowed.has(units)) return reply.status(400).send({ error: "Type non supporté" });
+      const current = await app.prisma.propertyTemplate.count({ where: { units } });
+      const target = current + 10;
+      const res = await ensureExactTypeCounts({ [units]: target });
+      return reply.send({ ok: true, before: current, after: target, created: res[units]?.created ?? 0 });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Erreur refill +10";
+      return reply.status(500).send({ error: message });
+    }
+  }
+  app.post("/api/properties/refill/units/:units/plus10", handleRefillPlus10);
+  app.get("/api/properties/refill/units/:units/plus10", handleRefillPlus10);
+
   // Liste des biens (holdings) d'un joueur dans une partie
   app.get("/api/games/:gameId/properties/holdings/:playerId", async (req, reply) => {
     const paramsSchema = z.object({ gameId: z.string(), playerId: z.string() });
