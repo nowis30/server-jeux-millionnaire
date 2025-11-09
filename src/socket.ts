@@ -26,8 +26,12 @@ export function setupSocket(server: HTTPServer) {
         if (env.CLIENT_ORIGINS.includes(origin)) return callback(null, true);
         // autoriser tous les déploiements Vercel (prod/preview)
         if (/\.vercel\.app$/.test(origin)) return callback(null, true);
-        // autoriser localhost en dev
+        // autoriser localhost en dev (http et https, avec/sans port)
         if (origin.startsWith("http://localhost:")) return callback(null, true);
+        if (origin.startsWith("https://localhost:")) return callback(null, true);
+        if (origin === "http://localhost" || origin === "https://localhost") return callback(null, true);
+        // autoriser Capacitor (app mobile)
+        if (origin === "capacitor://localhost") return callback(null, true);
         return callback(new Error("Origin not allowed"));
       },
     },

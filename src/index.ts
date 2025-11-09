@@ -79,8 +79,12 @@ async function bootstrap() {
       if (env.CLIENT_ORIGINS.includes(origin)) return cb(null, true);
       // autoriser tous les déploiements Vercel en preview
       if (/\.vercel\.app$/.test(origin)) return cb(null, true);
-      // autoriser localhost en dev
+      // autoriser localhost en dev (http et https, avec/sans port)
       if (origin.startsWith("http://localhost:")) return cb(null, true);
+      if (origin.startsWith("https://localhost:")) return cb(null, true);
+      if (origin === "http://localhost" || origin === "https://localhost") return cb(null, true);
+      // autoriser Capacitor (app mobile)
+      if (origin === "capacitor://localhost") return cb(null, true);
       // Log refus pour diagnostic en production (CORS)
       app.log.warn({ origin }, "CORS origin refusé");
       cb(new Error("Origin not allowed"), false);
@@ -159,7 +163,15 @@ async function bootstrap() {
       // Tolérance: si l'origine est autorisée et qu'une session utilisateur est présente (hm_auth),
       // on autorise sans CSRF pour compatibilité avec les navigateurs bloquant les cookies tiers.
       const origin = (req.headers?.["origin"] as string) || "";
-      const allowed = !origin || env.CLIENT_ORIGINS.includes(origin) || /\.vercel\.app$/.test(origin) || origin.startsWith("http://localhost:");
+      const allowed =
+        !origin ||
+        env.CLIENT_ORIGINS.includes(origin) ||
+        /\.vercel\.app$/.test(origin) ||
+        origin.startsWith("http://localhost:") ||
+        origin.startsWith("https://localhost:") ||
+        origin === "http://localhost" ||
+        origin === "https://localhost" ||
+        origin === "capacitor://localhost";
       const hasAuth = Boolean((req as any).cookies?.["hm_auth"]);
       const hasGuest = Boolean((req as any).cookies?.["hm_guest"]);
       const hasPlayerId = Boolean(req.headers?.["x-player-id"]);
