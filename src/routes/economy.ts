@@ -1,4 +1,4 @@
-import { FastifyInstance } from "fastify";
+import { FastifyInstance, RouteHandlerMethod } from "fastify";
 import { z } from "zod";
 
 // Déterminisme léger pour une planification d'appréciation future sans persistance
@@ -20,7 +20,14 @@ function hashString(s: string) {
 }
 
 export async function registerEconomyRoutes(app: FastifyInstance) {
-  app.get("/api/games/:gameId/economy", async (req, reply) => {
+  const registerGet = (path: string, handler: RouteHandlerMethod) => {
+    app.get(path, handler);
+    if (!path.endsWith("/")) {
+      app.get(`${path}/`, handler);
+    }
+  };
+
+  registerGet("/api/games/:gameId/economy", async (req, reply) => {
     const paramsSchema = z.object({ gameId: z.string() });
     const { gameId } = paramsSchema.parse((req as any).params);
     const g = await (app.prisma as any).game.findUnique({ where: { id: gameId }, select: { baseMortgageRate: true, appreciationAnnual: true, inflationAnnual: true, inflationIndex: true, startedAt: true } });

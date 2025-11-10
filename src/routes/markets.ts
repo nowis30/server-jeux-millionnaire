@@ -1,4 +1,4 @@
-import { FastifyInstance } from "fastify";
+import { FastifyInstance, RouteHandlerMethod } from "fastify";
 import { z } from "zod";
 import { latestPricesByGame, buyAsset, sellAsset, holdingsByPlayer, getHistory, returnsBySymbol } from "../services/market";
 import { MARKET_ASSETS, MarketSymbol } from "../shared/constants";
@@ -10,7 +10,14 @@ export async function registerMarketRoutes(app: FastifyInstance) {
   const cacheLatest = new Map<string, { exp: number; data: any }>();
   const cacheReturns = new Map<string, { exp: number; data: any }>();
 
-  app.get("/api/games/:gameId/markets/latest", async (req, reply) => {
+  const registerGet = (path: string, handler: RouteHandlerMethod) => {
+    app.get(path, handler);
+    if (!path.endsWith("/")) {
+      app.get(`${path}/`, handler);
+    }
+  };
+
+  registerGet("/api/games/:gameId/markets/latest", async (req, reply) => {
     const paramsSchema = z.object({ gameId: z.string() });
     const querySchema = z.object({ debug: z.coerce.boolean().optional() });
     try {
@@ -39,7 +46,7 @@ export async function registerMarketRoutes(app: FastifyInstance) {
     }
   });
 
-  app.get("/api/games/:gameId/markets/holdings/:playerId", async (req, reply) => {
+  registerGet("/api/games/:gameId/markets/holdings/:playerId", async (req, reply) => {
     const paramsSchema = z.object({ gameId: z.string(), playerId: z.string() });
     const { gameId, playerId } = paramsSchema.parse((req as any).params);
     const holdings = await holdingsByPlayer(gameId, playerId);
@@ -47,7 +54,7 @@ export async function registerMarketRoutes(app: FastifyInstance) {
   });
 
   // Diagnostic: dernier prix pour un seul actif (débug production)
-  app.get("/api/games/:gameId/markets/latest-one/:symbol", async (req, reply) => {
+  registerGet("/api/games/:gameId/markets/latest-one/:symbol", async (req, reply) => {
     const paramsSchema = z.object({ gameId: z.string(), symbol: z.enum(MARKET_ASSETS as unknown as [MarketSymbol, ...MarketSymbol[]]) });
     const { gameId, symbol } = paramsSchema.parse((req as any).params);
     try {
@@ -60,7 +67,7 @@ export async function registerMarketRoutes(app: FastifyInstance) {
   });
 
   // Diagnostic: agrégat latest (compte et premiers éléments)
-  app.get("/api/games/:gameId/markets/diag-latest", async (req, reply) => {
+  registerGet("/api/games/:gameId/markets/diag-latest", async (req, reply) => {
     const paramsSchema = z.object({ gameId: z.string() });
     const { gameId } = paramsSchema.parse((req as any).params);
     try {
@@ -73,7 +80,7 @@ export async function registerMarketRoutes(app: FastifyInstance) {
   });
 
   // Historique pour graphiques (jusqu’à 50 ans simulés)
-  app.get("/api/games/:gameId/markets/history/:symbol", async (req, reply) => {
+  registerGet("/api/games/:gameId/markets/history/:symbol", async (req, reply) => {
     const paramsSchema = z.object({ gameId: z.string(), symbol: z.enum(MARKET_ASSETS as unknown as [MarketSymbol, ...MarketSymbol[]]) });
     const querySchema = z.object({ years: z.coerce.number().min(1).max(50).optional() });
     const { gameId, symbol } = paramsSchema.parse((req as any).params);
@@ -83,7 +90,7 @@ export async function registerMarketRoutes(app: FastifyInstance) {
   });
 
   // Rendements par actif (fenêtres: 1h, 1d, 7d, 30d, ytd)
-  app.get("/api/games/:gameId/markets/returns", async (req, reply) => {
+  registerGet("/api/games/:gameId/markets/returns", async (req, reply) => {
     const paramsSchema = z.object({ gameId: z.string() });
     const querySchema = z.object({ windows: z.string().optional(), debug: z.coerce.boolean().optional() });
     try {
@@ -171,7 +178,7 @@ export async function registerMarketRoutes(app: FastifyInstance) {
   });
 
   // KPI dividendes reçus: 24h / 7j / YTD
-  app.get("/api/games/:gameId/markets/dividends/:playerId", async (req, reply) => {
+  registerGet("/api/games/:gameId/markets/dividends/:playerId", async (req, reply) => {
     const paramsSchema = z.object({ gameId: z.string(), playerId: z.string() });
     const { gameId, playerId } = paramsSchema.parse((req as any).params);
     const now = new Date();

@@ -26,6 +26,7 @@ import { registerQuizRoutes } from "./routes/quiz";
 import { registerPariRoutes } from "./routes/pari";
 import { registerTokenRoutes } from "./routes/tokens";
 import { registerReferralRoutes } from "./routes/referrals";
+import { registerBonusRoutes } from "./routes/bonus";
 import { generateAndSaveQuestions, replenishIfLow, maintainQuestionStock, ensureKidsPool, ensureMediumPool } from "./services/aiQuestions";
 import { ensurePropertyTypeQuotas } from "./services/seeder";
 
@@ -197,6 +198,7 @@ async function bootstrap() {
   await registerPariRoutes(app);
   await registerTokenRoutes(app);
   await registerReferralRoutes(app);
+  await registerBonusRoutes(app);
   try {
     await registerDocs(app);
   } catch (e) {
