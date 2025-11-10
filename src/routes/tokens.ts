@@ -2,8 +2,20 @@ import { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { prisma } from "../prisma";
 import { requireUserOrGuest } from "./auth";
-import { updatePariTokens, getPariSecondsUntilNext, PARI_MAX_TOKENS } from "../services/pariTokens";
-import { updatePlayerTokens, getTimeUntilNextToken } from "../services/quizTokens";
+import { updatePariTokens, getPariSecondsUntilNext, PARI_MAX_TOKENS, PARI_AD_REWARD } from "../services/pariTokens";
+import { updatePlayerTokens, getTimeUntilNextToken, QUIZ_MAX_TOKENS, QUIZ_AD_REWARD } from "../services/quizTokens";
+
+const AD_COOLDOWN_MINUTES = 30;
+const AD_COOLDOWN_SECONDS = AD_COOLDOWN_MINUTES * 60;
+
+function computeCooldownSeconds(last: Date | string | null | undefined, minutes: number): number {
+  if (!last) return 0;
+  const lastDate = typeof last === "string" ? new Date(last) : last;
+  const elapsedMs = Date.now() - lastDate.getTime();
+  const windowMs = minutes * 60 * 1000;
+  if (elapsedMs >= windowMs) return 0;
+  return Math.max(0, Math.ceil((windowMs - elapsedMs) / 1000));
+}
 
 export async function registerTokenRoutes(app: FastifyInstance) {
   // GET /api/games/:gameId/tokens - Statut combiné Quiz/Pari
@@ -28,9 +40,24 @@ export async function registerTokenRoutes(app: FastifyInstance) {
       getPariSecondsUntilNext(player.id),
     ]);
 
+    const adPariSeconds = computeCooldownSeconds(player.lastAdPariAt, AD_COOLDOWN_MINUTES);
+    const adQuizSeconds = computeCooldownSeconds(player.lastAdQuizAt, AD_COOLDOWN_MINUTES);
+
     return reply.send({
-      quiz: { tokens: quizTokens, max: 20, secondsUntilNext: quizNext },
-      pari: { tokens: pariTokens, max: PARI_MAX_TOKENS, secondsUntilNext: pariNext },
+      quiz: {
+        tokens: quizTokens,
+        max: QUIZ_MAX_TOKENS,
+        secondsUntilNext: quizNext,
+        adCooldownSeconds: adQuizSeconds,
+        adReward: QUIZ_AD_REWARD,
+      },
+      pari: {
+        tokens: pariTokens,
+        max: PARI_MAX_TOKENS,
+        secondsUntilNext: pariNext,
+        adCooldownSeconds: adPariSeconds,
+        adReward: PARI_AD_REWARD,
+      },
     });
   });
 
@@ -52,31 +79,65 @@ export async function registerTokenRoutes(app: FastifyInstance) {
     if (!player) return reply.status(404).send({ error: 'Joueur non trouvé' });
 
     const NOW = new Date();
-    const COOLDOWN_MINUTES = 30;
 
     if (type === 'pari') {
       if (player.lastAdPariAt) {
         const diffMin = (NOW.getTime() - new Date(player.lastAdPariAt).getTime()) / 60000;
-        if (diffMin < COOLDOWN_MINUTES) {
-          const remain = Math.ceil(COOLDOWN_MINUTES - diffMin);
-          return reply.status(429).send({ error: `Recharge Pari trop fréquente. Réessayez dans ${remain} min.` });
+        if (diffMin < AD_COOLDOWN_MINUTES) {
+          const remainMinutes = Math.ceil(AD_COOLDOWN_MINUTES - diffMin);
+          const retrySeconds = Math.max(0, Math.ceil((AD_COOLDOWN_MINUTES * 60) - diffMin * 60));
+          return reply.status(429).send({ error: `Recharge Pari trop fréquente. Réessayez dans ${remainMinutes} min.`, retrySeconds });
         }
       }
-  await (prisma as any).player.update({ where: { id: player.id }, data: { pariTokens: PARI_MAX_TOKENS, lastAdPariAt: NOW, pariTokensUpdatedAt: NOW } });
-  const after = await (prisma as any).player.findUnique({ where: { id: player.id }, select: { pariTokens: true } });
-  return reply.send({ ok: true, type: 'pari', tokens: after?.pariTokens ?? PARI_MAX_TOKENS, max: PARI_MAX_TOKENS });
+      const current = Number(player.pariTokens ?? 0);
+      const next = Math.min(PARI_MAX_TOKENS, current + PARI_AD_REWARD);
+      const added = Math.max(0, next - current);
+      await (prisma as any).player.update({
+        where: { id: player.id },
+        data: {
+          pariTokens: next,
+          lastAdPariAt: NOW,
+          ...(added > 0 ? { pariTokensUpdatedAt: NOW } : {}),
+        },
+      });
+      return reply.send({
+        ok: true,
+        type: 'pari',
+        tokens: next,
+        max: PARI_MAX_TOKENS,
+        added,
+        adReward: PARI_AD_REWARD,
+        cooldownSeconds: AD_COOLDOWN_SECONDS,
+      });
     } else {
       if (player.lastAdQuizAt) {
         const diffMin = (NOW.getTime() - new Date(player.lastAdQuizAt).getTime()) / 60000;
-        if (diffMin < COOLDOWN_MINUTES) {
-          const remain = Math.ceil(COOLDOWN_MINUTES - diffMin);
-          return reply.status(429).send({ error: `Recharge Quiz trop fréquente. Réessayez dans ${remain} min.` });
+        if (diffMin < AD_COOLDOWN_MINUTES) {
+          const remainMinutes = Math.ceil(AD_COOLDOWN_MINUTES - diffMin);
+          const retrySeconds = Math.max(0, Math.ceil((AD_COOLDOWN_MINUTES * 60) - diffMin * 60));
+          return reply.status(429).send({ error: `Recharge Quiz trop fréquente. Réessayez dans ${remainMinutes} min.`, retrySeconds });
         }
       }
-      const MAX_QUIZ = 20;
-      await (prisma as any).player.update({ where: { id: player.id }, data: { quizTokens: MAX_QUIZ, lastAdQuizAt: NOW, lastTokenEarnedAt: NOW } });
-      const after = await prisma.player.findUnique({ where: { id: player.id }, select: { quizTokens: true } });
-      return reply.send({ ok: true, type: 'quiz', tokens: after?.quizTokens ?? MAX_QUIZ, max: MAX_QUIZ });
+      const currentQuiz = Number(player.quizTokens ?? 0);
+      const nextQuiz = Math.min(QUIZ_MAX_TOKENS, currentQuiz + QUIZ_AD_REWARD);
+      const addedQuiz = Math.max(0, nextQuiz - currentQuiz);
+      await (prisma as any).player.update({
+        where: { id: player.id },
+        data: {
+          quizTokens: nextQuiz,
+          lastAdQuizAt: NOW,
+          ...(addedQuiz > 0 ? { lastTokenEarnedAt: NOW } : {}),
+        },
+      });
+      return reply.send({
+        ok: true,
+        type: 'quiz',
+        tokens: nextQuiz,
+        max: QUIZ_MAX_TOKENS,
+        added: addedQuiz,
+        adReward: QUIZ_AD_REWARD,
+        cooldownSeconds: AD_COOLDOWN_SECONDS,
+      });
     }
   });
 }

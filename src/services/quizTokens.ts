@@ -7,6 +7,8 @@ import { prisma } from "../prisma";
 
 const TOKEN_EARN_INTERVAL_MS = 60 * 60 * 1000; // 1 heure en millisecondes
 const MAX_TOKENS = 20; // Nombre maximum de tokens accumulables
+export const QUIZ_MAX_TOKENS = MAX_TOKENS;
+export const QUIZ_AD_REWARD = 20;
 
 /**
  * Vérifie et ajoute les tokens gagnés pour un joueur

@@ -8,6 +8,7 @@ import {
   consumeQuizToken,
   refundQuizToken,
   getTimeUntilNextToken,
+  QUIZ_AD_REWARD,
 } from "../services/quizTokens";
 
 // Règle Quitte ou Double: démarrage à 50000$ et double à chaque bonne réponse
@@ -31,6 +32,16 @@ function shuffle<T>(arr: T[]): T[] {
 
 const COOLDOWN_MINUTES = 60;
 const MAX_QUESTIONS = 10;
+const AD_RECHARGE_COOLDOWN_MINUTES = 30;
+
+function computeAdCooldownSeconds(last: Date | string | null | undefined): number {
+  if (!last) return 0;
+  const lastDate = typeof last === 'string' ? new Date(last) : last;
+  const elapsedMs = Date.now() - lastDate.getTime();
+  const windowMs = AD_RECHARGE_COOLDOWN_MINUTES * 60 * 1000;
+  if (elapsedMs >= windowMs) return 0;
+  return Math.max(0, Math.ceil((windowMs - elapsedMs) / 1000));
+}
 
 // Images enfant pour les 2 premières questions (thèmes simples, pédagogiques)
 // Ancienne configuration d'images enfants désactivée
@@ -317,6 +328,8 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         },
       });
 
+  const adCooldownSeconds = computeAdCooldownSeconds((player as any)?.lastAdQuizAt);
+
       if (activeSession) {
         const currentPrizeAmount = getPrizeAmount(activeSession.currentQuestion);
         return reply.send({
@@ -324,6 +337,8 @@ export async function registerQuizRoutes(app: FastifyInstance) {
           hasActiveSession: true,
           tokens: currentTokens,
           secondsUntilNextToken,
+          adCooldownSeconds,
+          adReward: QUIZ_AD_REWARD,
           session: {
             id: activeSession.id,
             currentQuestion: activeSession.currentQuestion,
@@ -341,6 +356,8 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         hasActiveSession: false,
         tokens: currentTokens,
         secondsUntilNextToken,
+        adCooldownSeconds,
+        adReward: QUIZ_AD_REWARD,
       });
 
     } catch (err: any) {
