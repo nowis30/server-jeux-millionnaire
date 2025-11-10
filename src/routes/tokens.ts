@@ -5,8 +5,11 @@ import { requireUserOrGuest } from "./auth";
 import { updatePariTokens, getPariSecondsUntilNext, PARI_MAX_TOKENS, PARI_AD_REWARD } from "../services/pariTokens";
 import { updatePlayerTokens, getTimeUntilNextToken, QUIZ_MAX_TOKENS, QUIZ_AD_REWARD } from "../services/quizTokens";
 
-const AD_COOLDOWN_MINUTES = 30;
-const AD_COOLDOWN_SECONDS = AD_COOLDOWN_MINUTES * 60;
+// Cooldowns distincts: Pari 5 min, Quiz 30 min
+const PARI_AD_COOLDOWN_MINUTES = 5;
+const QUIZ_AD_COOLDOWN_MINUTES = 30;
+const PARI_AD_COOLDOWN_SECONDS = PARI_AD_COOLDOWN_MINUTES * 60;
+const QUIZ_AD_COOLDOWN_SECONDS = QUIZ_AD_COOLDOWN_MINUTES * 60;
 
 function computeCooldownSeconds(last: Date | string | null | undefined, minutes: number): number {
   if (!last) return 0;
@@ -40,8 +43,8 @@ export async function registerTokenRoutes(app: FastifyInstance) {
       getPariSecondsUntilNext(player.id),
     ]);
 
-    const adPariSeconds = computeCooldownSeconds(player.lastAdPariAt, AD_COOLDOWN_MINUTES);
-    const adQuizSeconds = computeCooldownSeconds(player.lastAdQuizAt, AD_COOLDOWN_MINUTES);
+  const adPariSeconds = computeCooldownSeconds(player.lastAdPariAt, PARI_AD_COOLDOWN_MINUTES);
+  const adQuizSeconds = computeCooldownSeconds(player.lastAdQuizAt, QUIZ_AD_COOLDOWN_MINUTES);
 
     return reply.send({
       quiz: {
@@ -83,9 +86,9 @@ export async function registerTokenRoutes(app: FastifyInstance) {
     if (type === 'pari') {
       if (player.lastAdPariAt) {
         const diffMin = (NOW.getTime() - new Date(player.lastAdPariAt).getTime()) / 60000;
-        if (diffMin < AD_COOLDOWN_MINUTES) {
-          const remainMinutes = Math.ceil(AD_COOLDOWN_MINUTES - diffMin);
-          const retrySeconds = Math.max(0, Math.ceil((AD_COOLDOWN_MINUTES * 60) - diffMin * 60));
+        if (diffMin < PARI_AD_COOLDOWN_MINUTES) {
+          const remainMinutes = Math.ceil(PARI_AD_COOLDOWN_MINUTES - diffMin);
+          const retrySeconds = Math.max(0, Math.ceil((PARI_AD_COOLDOWN_MINUTES * 60) - diffMin * 60));
           return reply.status(429).send({ error: `Recharge Pari trop fréquente. Réessayez dans ${remainMinutes} min.`, retrySeconds });
         }
       }
@@ -107,14 +110,14 @@ export async function registerTokenRoutes(app: FastifyInstance) {
         max: PARI_MAX_TOKENS,
         added,
         adReward: PARI_AD_REWARD,
-        cooldownSeconds: AD_COOLDOWN_SECONDS,
+        cooldownSeconds: PARI_AD_COOLDOWN_SECONDS,
       });
     } else {
       if (player.lastAdQuizAt) {
         const diffMin = (NOW.getTime() - new Date(player.lastAdQuizAt).getTime()) / 60000;
-        if (diffMin < AD_COOLDOWN_MINUTES) {
-          const remainMinutes = Math.ceil(AD_COOLDOWN_MINUTES - diffMin);
-          const retrySeconds = Math.max(0, Math.ceil((AD_COOLDOWN_MINUTES * 60) - diffMin * 60));
+        if (diffMin < QUIZ_AD_COOLDOWN_MINUTES) {
+          const remainMinutes = Math.ceil(QUIZ_AD_COOLDOWN_MINUTES - diffMin);
+          const retrySeconds = Math.max(0, Math.ceil((QUIZ_AD_COOLDOWN_MINUTES * 60) - diffMin * 60));
           return reply.status(429).send({ error: `Recharge Quiz trop fréquente. Réessayez dans ${remainMinutes} min.`, retrySeconds });
         }
       }
@@ -136,7 +139,7 @@ export async function registerTokenRoutes(app: FastifyInstance) {
         max: QUIZ_MAX_TOKENS,
         added: addedQuiz,
         adReward: QUIZ_AD_REWARD,
-        cooldownSeconds: AD_COOLDOWN_SECONDS,
+        cooldownSeconds: QUIZ_AD_COOLDOWN_SECONDS,
       });
     }
   });

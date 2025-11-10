@@ -4,8 +4,8 @@ import { prisma } from "../prisma";
 const HOUR_MS = 60 * 60 * 1000;
 export const PARI_MAX_TOKENS = 100;
 export const PARI_TOKENS_PER_HOUR = 5;
-// Récompense publicitaire: +20 tokens (plafonné au max)
-export const PARI_AD_REWARD = 20;
+// Récompense publicitaire: recharge max (jusqu'au plafond)
+export const PARI_AD_REWARD = PARI_MAX_TOKENS; // 100
 
 export async function updatePariTokens(playerId: string): Promise<number> {
   const player = await (prisma as any).player.findUnique({

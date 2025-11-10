@@ -4,14 +4,17 @@ import { prisma } from "../prisma";
 import { updatePariTokens, consumePariToken, getPariSecondsUntilNext, PARI_MAX_TOKENS, PARI_AD_REWARD } from "../services/pariTokens";
 import { QUIZ_AD_REWARD, QUIZ_MAX_TOKENS } from "../services/quizTokens";
 import { requireUserOrGuest } from "./auth";
-const AD_COOLDOWN_MINUTES = 30;
-const AD_COOLDOWN_SECONDS = AD_COOLDOWN_MINUTES * 60;
+// Cooldown spécifique Pari réduit à 5 minutes; Quiz reste 30 min dans cette route pour cohérence si utilisé
+const PARI_AD_COOLDOWN_MINUTES = 5;
+const QUIZ_AD_COOLDOWN_MINUTES = 30;
+const PARI_AD_COOLDOWN_SECONDS = PARI_AD_COOLDOWN_MINUTES * 60;
+const QUIZ_AD_COOLDOWN_SECONDS = QUIZ_AD_COOLDOWN_MINUTES * 60;
 
-function computeCooldownSeconds(last: Date | string | null | undefined): number {
+function computeCooldownSeconds(last: Date | string | null | undefined, minutes: number): number {
   if (!last) return 0;
   const lastDate = typeof last === 'string' ? new Date(last) : last;
   const elapsedMs = Date.now() - lastDate.getTime();
-  const windowMs = AD_COOLDOWN_MINUTES * 60 * 1000;
+  const windowMs = minutes * 60 * 1000;
   if (elapsedMs >= windowMs) return 0;
   return Math.max(0, Math.ceil((windowMs - elapsedMs) / 1000));
 }
@@ -72,7 +75,7 @@ export async function registerPariRoutes(app: FastifyInstance) {
     if (!player) return reply.status(404).send({ error: 'Joueur non trouvé' });
     const tokens = await updatePariTokens(player.id);
     const secondsUntilNext = await getPariSecondsUntilNext(player.id);
-    const adCooldownSeconds = computeCooldownSeconds(player.lastAdPariAt);
+    const adCooldownSeconds = computeCooldownSeconds(player.lastAdPariAt, PARI_AD_COOLDOWN_MINUTES);
     return reply.send({ tokens, max: PARI_MAX_TOKENS, secondsUntilNext, canPlay: tokens > 0, adCooldownSeconds, adReward: PARI_AD_REWARD });
   });
 
@@ -167,14 +170,15 @@ export async function registerPariRoutes(app: FastifyInstance) {
     if (type === 'pari') {
       if (player.lastAdPariAt) {
         const diffMin = (NOW.getTime() - new Date(player.lastAdPariAt).getTime()) / 60000;
-        if (diffMin < AD_COOLDOWN_MINUTES) {
-          const remainMinutes = Math.ceil(AD_COOLDOWN_MINUTES - diffMin);
-          const retrySeconds = Math.max(0, Math.ceil((AD_COOLDOWN_MINUTES * 60) - diffMin * 60));
+        if (diffMin < PARI_AD_COOLDOWN_MINUTES) {
+          const remainMinutes = Math.ceil(PARI_AD_COOLDOWN_MINUTES - diffMin);
+          const retrySeconds = Math.max(0, Math.ceil((PARI_AD_COOLDOWN_MINUTES * 60) - diffMin * 60));
           return reply.status(429).send({ error: `Recharge Pari trop fréquente. Réessayez dans ${remainMinutes} min.`, retrySeconds });
         }
       }
       const current = Number(player.pariTokens ?? 0);
-      const next = Math.min(PARI_MAX_TOKENS, current + PARI_AD_REWARD);
+      // Récompense = recharge max: on positionne directement au plafond
+      const next = PARI_MAX_TOKENS;
       const added = Math.max(0, next - current);
       await (prisma as any).player.update({
         where: { id: player.id },
@@ -184,13 +188,13 @@ export async function registerPariRoutes(app: FastifyInstance) {
           ...(added > 0 ? { pariTokensUpdatedAt: NOW } : {}),
         },
       });
-      return reply.send({ ok: true, type: 'pari', tokens: next, max: PARI_MAX_TOKENS, added, adReward: PARI_AD_REWARD, cooldownSeconds: AD_COOLDOWN_SECONDS, message: added > 0 ? `+${added} tokens Pari ajoutés ✅` : 'Tokens déjà au maximum ✅' });
+      return reply.send({ ok: true, type: 'pari', tokens: next, max: PARI_MAX_TOKENS, added, adReward: PARI_AD_REWARD, cooldownSeconds: PARI_AD_COOLDOWN_SECONDS, message: added > 0 ? `Recharge max ✅ (+${added})` : 'Tokens déjà au maximum ✅' });
     } else {
       if (player.lastAdQuizAt) {
         const diffMin = (NOW.getTime() - new Date(player.lastAdQuizAt).getTime()) / 60000;
-        if (diffMin < AD_COOLDOWN_MINUTES) {
-          const remainMinutes = Math.ceil(AD_COOLDOWN_MINUTES - diffMin);
-          const retrySeconds = Math.max(0, Math.ceil((AD_COOLDOWN_MINUTES * 60) - diffMin * 60));
+        if (diffMin < QUIZ_AD_COOLDOWN_MINUTES) {
+          const remainMinutes = Math.ceil(QUIZ_AD_COOLDOWN_MINUTES - diffMin);
+          const retrySeconds = Math.max(0, Math.ceil((QUIZ_AD_COOLDOWN_MINUTES * 60) - diffMin * 60));
           return reply.status(429).send({ error: `Recharge Quiz trop fréquente. Réessayez dans ${remainMinutes} min.`, retrySeconds });
         }
       }
@@ -205,7 +209,7 @@ export async function registerPariRoutes(app: FastifyInstance) {
           ...(addedQuiz > 0 ? { lastTokenEarnedAt: NOW } : {}),
         },
       });
-      return reply.send({ ok: true, type: 'quiz', tokens: nextQuiz, max: QUIZ_MAX_TOKENS, added: addedQuiz, adReward: QUIZ_AD_REWARD, cooldownSeconds: AD_COOLDOWN_SECONDS, message: addedQuiz > 0 ? `+${addedQuiz} tokens Quiz ajoutés ✅` : 'Tokens Quiz déjà au maximum ✅' });
+      return reply.send({ ok: true, type: 'quiz', tokens: nextQuiz, max: QUIZ_MAX_TOKENS, added: addedQuiz, adReward: QUIZ_AD_REWARD, cooldownSeconds: QUIZ_AD_COOLDOWN_SECONDS, message: addedQuiz > 0 ? `+${addedQuiz} tokens Quiz ajoutés ✅` : 'Tokens Quiz déjà au maximum ✅' });
     }
   });
 }
