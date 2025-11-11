@@ -74,6 +74,20 @@ async function bootstrap() {
   // CORS: accepter une liste d'origines
   await app.register(cors, {
     credentials: true,
+    // Autoriser méthodes et en-têtes nécessaires aux preflights (auth/login, etc.)
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-CSRF-Token",
+      "X-XSRF-Token",
+      "X-Player-ID",
+    ],
+    exposedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "Set-Cookie",
+    ],
     origin: (origin, cb) => {
       // autoriser requêtes serveur-à-serveur et outils (origin nul)
       if (!origin) return cb(null, true);
@@ -87,7 +101,7 @@ async function bootstrap() {
       // autoriser Capacitor (app mobile)
       if (origin === "capacitor://localhost") return cb(null, true);
       // Log refus pour diagnostic en production (CORS)
-      app.log.warn({ origin }, "CORS origin refusé");
+      app.log.warn({ origin, allowed: env.CLIENT_ORIGINS }, "CORS origin refusé");
       cb(new Error("Origin not allowed"), false);
     },
   });
