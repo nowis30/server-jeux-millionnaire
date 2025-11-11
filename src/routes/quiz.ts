@@ -884,6 +884,141 @@ export async function registerQuizRoutes(app: FastifyInstance) {
     }
   });
 
+  // POST /api/games/:gameId/quiz/reveal - Regarder une pub pour obtenir automatiquement la bonne réponse
+  app.post("/api/games/:gameId/quiz/reveal", { preHandler: requireUserOrGuest(app) }, async (req, reply) => {
+    const paramsSchema = z.object({ gameId: z.string() });
+    const bodySchema = z.object({ sessionId: z.string(), questionId: z.string() });
+    const { gameId } = paramsSchema.parse((req as any).params);
+    const { sessionId, questionId } = bodySchema.parse((req as any).body);
+
+    try {
+      const session = await prisma.quizSession.findUnique({ where: { id: sessionId }, include: { player: true } });
+      if (!session || session.status !== 'active') {
+        return reply.status(404).send({ error: "Session non trouvée ou terminée" });
+      }
+      if (session.gameId !== gameId) {
+        return reply.status(403).send({ error: "Cette session n'appartient pas à cette partie" });
+      }
+
+      const question = await prisma.quizQuestion.findUnique({ where: { id: questionId } });
+      if (!question) {
+        return reply.status(404).send({ error: "Question non trouvée" });
+      }
+
+      const alreadyResolved = await prisma.quizAttempt.findFirst({
+        where: {
+          sessionId: session.id,
+          questionId,
+          questionNumber: session.currentQuestion,
+        },
+      });
+      if (alreadyResolved) {
+        return reply.status(409).send({ error: "Cette question a déjà été résolue." });
+      }
+
+      const prizeBefore = session.currentEarnings;
+      const prizeAfter = getPrizeAmount(session.currentQuestion);
+
+      await prisma.quizAttempt.create({
+        data: {
+          sessionId: session.id,
+          questionId: question.id,
+          questionNumber: session.currentQuestion,
+          playerAnswer: 'AD_REVEAL',
+          isCorrect: true,
+          prizeBefore,
+          prizeAfter,
+        },
+      });
+
+      // Dernière question: terminer immédiatement
+      if (session.currentQuestion >= MAX_QUESTIONS) {
+        await prisma.quizSession.update({
+          where: { id: session.id },
+          data: {
+            status: 'completed',
+            currentEarnings: prizeAfter,
+            securedAmount: prizeAfter,
+            completedAt: new Date(),
+          },
+        });
+
+        await prisma.player.update({
+          where: { id: session.playerId },
+          data: {
+            cash: { increment: prizeAfter },
+            netWorth: { increment: prizeAfter },
+            cumulativeQuizGain: { increment: prizeAfter },
+          },
+        });
+
+        return reply.send({
+          revealed: true,
+          completed: true,
+          correctAnswer: question.correctAnswer,
+          finalPrize: prizeAfter,
+          message: `Réponse dévoilée via publicité. Vous terminez avec $${prizeAfter.toLocaleString()} !`,
+        });
+      }
+
+      const nextQuestionNumber = session.currentQuestion + 1;
+
+      const updatedSession = await prisma.quizSession.update({
+        where: { id: session.id },
+        data: {
+          currentQuestion: nextQuestionNumber,
+          currentEarnings: prizeAfter,
+        },
+        select: { skipsLeft: true, securedAmount: true },
+      });
+
+      // Précharger les pools pertinents pour la prochaine question
+      if (nextQuestionNumber <= 2) {
+        try { ensureKidsPool(450, 500).catch(() => {}); } catch {}
+      }
+      if (nextQuestionNumber > 2 && nextQuestionNumber <= 5) {
+        try { ensureMediumPool(450, 500).catch(() => {}); } catch {}
+      }
+
+      const nextQuestion = nextQuestionNumber <= 2
+        ? await selectKidFriendlyQuestion(session.playerId, session.id)
+        : (nextQuestionNumber <= 5
+            ? await selectUnseenQuestion(session.playerId, 'medium', session.id)
+            : await selectHardGeneric(session.playerId, session.id));
+
+      if (!nextQuestion) {
+        return reply.status(500).send({ error: "Aucune question suivante disponible" });
+      }
+
+      await markQuestionAsSeen(session.playerId, nextQuestion.id);
+      const qWithImg = attachImage(nextQuestionNumber, nextQuestion);
+
+      return reply.send({
+        revealed: true,
+        completed: false,
+        correctAnswer: question.correctAnswer,
+        currentQuestion: nextQuestionNumber,
+        currentEarnings: prizeAfter,
+        securedAmount: updatedSession.securedAmount ?? 0,
+        skipsLeft: updatedSession.skipsLeft ?? 0,
+        nextPrize: getPrizeAmount(nextQuestionNumber),
+        question: {
+          id: qWithImg.id,
+          text: qWithImg.question,
+          optionA: qWithImg.optionA,
+          optionB: qWithImg.optionB,
+          optionC: qWithImg.optionC,
+          optionD: qWithImg.optionD,
+          imageUrl: qWithImg.imageUrl || null,
+        },
+        message: `Réponse ${question.correctAnswer} révélée. Question suivante chargée.`,
+      });
+    } catch (err: any) {
+      app.log.error({ err }, "Erreur reveal quiz");
+      return reply.status(500).send({ error: err.message });
+    }
+  });
+
   // POST /api/games/:gameId/quiz/answer - Répondre à la question actuelle
   app.post("/api/games/:gameId/quiz/answer", { preHandler: requireUserOrGuest(app) }, async (req, reply) => {
     const paramsSchema = z.object({ gameId: z.string() });

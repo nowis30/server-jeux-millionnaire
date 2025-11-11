@@ -321,6 +321,53 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     ] as any);
     return reply.send({ ok: true });
   });
+
+  // Suppression du compte (utilisateur authentifié uniquement)
+  app.post("/api/auth/delete-account", async (req: any, reply) => {
+    try {
+      // Authentifier l'utilisateur via le cookie/token
+      const authHeader = (req.headers?.["authorization"] as string) || "";
+      const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+      const tokenCookie = req.cookies?.["hm_auth"];
+      const raw = bearer || tokenCookie;
+      if (!raw) return reply.status(401).send({ error: "Unauthenticated" });
+  const payload = (app as any).jwt.verify(raw) as { sub: string; email: string };
+      const userId = payload.sub;
+      const userEmail = (payload.email || "").toLowerCase();
+
+      // Anonymiser les traces personnelles simples côté jeu (nickname == email)
+      const anon = `deleted-${Math.random().toString(36).slice(2, 8)}`;
+      await prisma.$transaction([
+        // Supprimer tous les joueurs liés au compte (guestId = email ou nickname = email)
+        prisma.player.deleteMany({
+          where: {
+            OR: [
+              { guestId: { equals: userEmail, mode: 'insensitive' } },
+              { nickname: { equals: userEmail, mode: 'insensitive' } }
+            ]
+          }
+        }),
+        // Supprimer les prix attribués à cet email
+        prisma.prize.deleteMany({ where: { winnerEmail: { equals: userEmail, mode: 'insensitive' } } }),
+        // Nettoyer les tokens liés au compte
+        (prisma as any).passwordResetToken.deleteMany({ where: { userId } }),
+        (prisma as any).emailVerificationToken.deleteMany({ where: { userId } }),
+        // Supprimer l'utilisateur
+        prisma.user.delete({ where: { id: userId } }),
+      ] as any);
+
+      // Invalider les cookies d'authentification côté client
+      const common = { path: "/", sameSite: "none" as const, secure: true };
+      reply.clearCookie("hm_auth", common);
+      reply.clearCookie("hm_csrf", common);
+      reply.clearCookie("hm_guest", common);
+
+      return reply.send({ deleted: true });
+    } catch (e: any) {
+      req.log?.error?.({ err: e }, "delete-account failed");
+      return reply.status(500).send({ error: "Impossible de supprimer le compte maintenant" });
+    }
+  });
 }
 
 export function requireAdmin(app: FastifyInstance) {
