@@ -81,6 +81,8 @@ async function bootstrap() {
       "Authorization",
       "X-CSRF-Token",
       "X-XSRF-Token",
+      "X-CSRF",
+      "x-csrf",
       "X-Player-ID",
     ],
     exposedHeaders: [
