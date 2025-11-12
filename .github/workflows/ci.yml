@@ -42,15 +42,15 @@ jobs:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/heritier
         run: npx prisma generate
 
-      - name: Prisma migrate deploy
+      - name: Prisma db push (sync schema for tests)
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/heritier
-        run: npx prisma migrate deploy
+        run: npx prisma db push
 
       - name: Build
         run: npm run build
 
-      - name: Run smoke and route tests
+      - name: Run smoke and route tests (including drag)
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/heritier
         run: |
@@ -58,3 +58,4 @@ jobs:
           npm run test:smoke:market
           npm run test:smoke:portfolio
           npm run test:routes:portfolio
+          npm run test:routes:drag
