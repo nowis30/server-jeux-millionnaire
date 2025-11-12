@@ -27,6 +27,7 @@ import { registerPariRoutes } from "./routes/pari";
 import { registerTokenRoutes } from "./routes/tokens";
 import { registerReferralRoutes } from "./routes/referrals";
 import { registerBonusRoutes } from "./routes/bonus";
+import { registerDragRoutes } from "./routes/drag";
 import { generateAndSaveQuestions, replenishIfLow, maintainQuestionStock, ensureKidsPool, ensureMediumPool } from "./services/aiQuestions";
 import { ensurePropertyTypeQuotas } from "./services/seeder";
 
@@ -56,6 +57,21 @@ async function bootstrap() {
       console.log("[boot] Prisma db push completed.");
     } catch (e2) {
       console.error("[boot] Prisma db push failed", e2);
+    }
+  }
+  // Nouveau: tenter aussi un accès à DragRun pour déclencher db push si nécessaire
+  try {
+    await (prisma as any).dragRun.count();
+  } catch (e) {
+    try {
+      console.warn("[boot] DragRun missing — running 'prisma db push' fallback...");
+      execSync("npx prisma db push", {
+        stdio: "inherit",
+        cwd: path.resolve(__dirname, ".."),
+      });
+      console.log("[boot] Prisma db push completed (DragRun).");
+    } catch (e2) {
+      console.error("[boot] Prisma db push failed (DragRun)", e2);
     }
   }
   if (env.SEED_ON_BOOT) {
@@ -215,6 +231,7 @@ async function bootstrap() {
   await registerTokenRoutes(app);
   await registerReferralRoutes(app);
   await registerBonusRoutes(app);
+  await registerDragRoutes(app);
   try {
     await registerDocs(app);
   } catch (e) {

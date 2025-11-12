@@ -60,6 +60,13 @@ model Player {
   sentInvites      ReferralInvite[] @relation("Inviter")
   acceptedInvites  ReferralInvite[] @relation("Invitee")
 
+  // Mini‑jeu Drag (progression/anti‑abus)
+  dragStage        Int      @default(1)     // Prochaine étape débloquée (1 = départ)
+  dragLastRewardAt DateTime?
+  dragLastRunAt    DateTime?
+  dragBestTimeMs   Int?
+  dragRuns         DragRun[]
+
   @@unique([gameId, guestId])
   @@unique([gameId, nickname])
 }
@@ -87,6 +94,8 @@ model Game {
   dividendLogs DividendLog[]
   quizSessions QuizSession[]
   referralInvites ReferralInvite[]
+  // Mini‑jeu Drag (historique)
+  dragRuns DragRun[]
 }
 
 model PropertyTemplate {
@@ -317,6 +326,25 @@ model QuizAttempt {
   answeredAt   DateTime    @default(now())
   
   @@index([sessionId])
+}
+
+// Historique des courses du mini‑jeu Drag
+model DragRun {
+  id            String   @id @default(cuid())
+  player        Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  playerId      String
+  game          Game     @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  gameId        String
+  stage         Int
+  elapsedMs     Int
+  win           Boolean
+  perfectShifts Int      @default(0)
+  reward        Float    @default(0)
+  grantedReward Float    @default(0)
+  deviceInfo    String?
+  createdAt     DateTime @default(now())
+
+  @@index([gameId, playerId, createdAt])
 }
 
 // Invitations / Parrainage
