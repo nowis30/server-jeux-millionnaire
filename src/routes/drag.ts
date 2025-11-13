@@ -27,35 +27,48 @@ function computeReward(win: boolean, _stage: number, _perfectShifts: number): nu
 export async function registerDragRoutes(app: FastifyInstance) {
   // GET /api/games/:gameId/drag/session
   app.get("/api/games/:gameId/drag/session", { preHandler: requireUserOrGuest(app) }, async (req, reply) => {
-    const paramsSchema = z.object({ gameId: z.string() });
-    const { gameId } = paramsSchema.parse((req as any).params);
+    try {
+      const paramsSchema = z.object({ gameId: z.string() });
+      const { gameId } = paramsSchema.parse((req as any).params);
 
-    const player = await resolvePlayerForRequest(app, req, gameId);
-    if (!player) return reply.status(404).send({ error: "Player not found" });
+      const player = await resolvePlayerForRequest(app, req, gameId);
+      if (!player) return reply.status(404).send({ error: "Player not found" });
 
-    // Lire progression (via Prisma any pour compat compatibilité si client non régénéré)
-    const p = await (prisma as any).player.findUnique({
-      where: { id: player.id },
-      select: {
-        id: true, nickname: true, cash: true, netWorth: true,
-        dragStage: true, dragLastRewardAt: true,
-        dragEngineLevel: true, dragTransmissionLevel: true,
-      },
-    });
-    const now = Date.now();
-    const last = p?.dragLastRewardAt ? new Date(p.dragLastRewardAt).getTime() : 0;
-    const remaining = Math.max(0, Math.ceil((DRAG_REWARD_COOLDOWN_MS - (now - last)) / 1000));
+      // Lire progression (via Prisma any pour compat compatibilité si client non régénéré)
+      const p = await (prisma as any).player.findUnique({
+        where: { id: player.id },
+        select: {
+          id: true, nickname: true, cash: true, netWorth: true,
+          dragStage: true, dragLastRewardAt: true,
+          dragEngineLevel: true, dragTransmissionLevel: true,
+        },
+      });
+      
+      if (!p) {
+        return reply.status(404).send({ error: "Player data not found" });
+      }
 
-    return reply.send({
-      player: { id: p.id, nickname: p.nickname, cash: p.cash, netWorth: p.netWorth },
-      drag: {
-        stage: Number(p.dragStage ?? 1),
-        engineLevel: Number(p.dragEngineLevel ?? 1),
-        transmissionLevel: Number(p.dragTransmissionLevel ?? 1),
-        tuning: { engineMax: 1.6, nitroPowerMax: 1.8, nitroChargesMax: 3 },
-        cooldowns: { rewardCooldownSeconds: remaining },
-      },
-    });
+      const now = Date.now();
+      const last = p?.dragLastRewardAt ? new Date(p.dragLastRewardAt).getTime() : 0;
+      const remaining = Math.max(0, Math.ceil((DRAG_REWARD_COOLDOWN_MS - (now - last)) / 1000));
+
+      return reply.send({
+        player: { id: p.id, nickname: p.nickname, cash: p.cash, netWorth: p.netWorth },
+        drag: {
+          stage: Number(p.dragStage ?? 1),
+          engineLevel: Number(p.dragEngineLevel ?? 1),
+          transmissionLevel: Number(p.dragTransmissionLevel ?? 1),
+          tuning: { engineMax: 1.6, nitroPowerMax: 1.8, nitroChargesMax: 3 },
+          cooldowns: { rewardCooldownSeconds: remaining },
+        },
+      });
+    } catch (error) {
+      app.log.error({ error, route: '/drag/session' }, 'Error in drag session');
+      return reply.status(500).send({ 
+        error: "Internal server error", 
+        message: error instanceof Error ? error.message : 'Unknown error' 
+      });
+    }
   });
 
   // POST /api/games/:gameId/drag/result
