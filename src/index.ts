@@ -182,8 +182,15 @@ async function bootstrap() {
     const method = (req.method || "GET").toUpperCase();
     if (["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
       const url = (req as any).url as string;
+      const origin = (req.headers?.["origin"] as string) || "";
       
-      // Exemptions: auth endpoints, quiz, drag et join (qui utilisent X-Player-ID ou origine autorisée)
+      // EXEMPTION COMPLÈTE pour GitHub Pages - pas de vérification CSRF
+      if (origin === "https://nowis30.github.io" || origin.endsWith(".github.io")) {
+        req.log.info({ url, method, origin }, "CSRF check skipped (GitHub Pages)");
+        return;
+      }
+      
+      // Exemptions: auth endpoints, quiz, drag et join
       if (url.startsWith("/api/auth/login") || 
           url.startsWith("/api/auth/register") || 
           url.startsWith("/api/auth/logout") ||
@@ -203,39 +210,23 @@ async function bootstrap() {
         return;
       }
       
-      // Tolérance: si l'origine est autorisée et qu'une session utilisateur est présente (hm_auth),
-      // on autorise sans CSRF pour compatibilité avec les navigateurs bloquant les cookies tiers.
-      const origin = (req.headers?.["origin"] as string) || "";
+      // Tolérance: origine autorisée sans CSRF strict
       const allowed =
         !origin ||
         env.CLIENT_ORIGINS.includes(origin) ||
         /\.vercel\.app$/.test(origin) ||
-        origin === "https://nowis30.github.io" ||
-        origin.endsWith(".github.io") ||
         origin.startsWith("http://localhost:") ||
         origin.startsWith("https://localhost:") ||
         origin === "http://localhost" ||
         origin === "https://localhost" ||
         origin === "capacitor://localhost";
-      const hasAuth = Boolean((req as any).cookies?.["hm_auth"]);
-      const hasGuest = Boolean((req as any).cookies?.["hm_guest"]);
-      const hasPlayerId = Boolean(req.headers?.["x-player-id"]);
       
-      // Tolérer si origine autorisée ET (header CSRF présent OU session authentifiée OU guest/playerId présent)
-      if (allowed && tokenHeader) {
-        req.log.info({ url, method, origin }, "CSRF check passed (allowed origin + token header)");
-        return;
-      }
-      if (allowed && hasAuth) {
-        req.log.info({ url, method, origin }, "CSRF check passed (allowed origin + auth cookie)");
-        return;
-      }
-      if (allowed && (hasGuest || hasPlayerId)) {
-        req.log.info({ url, method, origin }, "CSRF check passed (allowed origin + guest/playerId)");
+      if (allowed) {
+        req.log.info({ url, method, origin }, "CSRF check passed (allowed origin)");
         return;
       }
       
-      req.log.warn({ url, method, origin, allowed, hasAuth, hasGuest, hasPlayerId, csrfCookie: !!csrfCookie, tokenHeader: !!tokenHeader }, "CSRF check failed");
+      req.log.warn({ url, method, origin, csrfCookie: !!csrfCookie, tokenHeader: !!tokenHeader }, "CSRF check failed");
       return reply.status(403).send({ error: "CSRF token invalid" });
     }
   });
