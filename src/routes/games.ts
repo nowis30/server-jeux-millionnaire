@@ -4,7 +4,7 @@ import { prisma } from "../prisma";
 import { z } from "zod";
 import { INITIAL_CASH } from "../shared/constants";
 import { customAlphabet } from "nanoid";
-import { requireAdmin, requireUser } from "./auth";
+import { requireAdmin, requireUser, requireUserOrGuest } from "./auth";
 import { cleanupMarketTicks } from "../services/tickCleanup";
 import { getOnlineCount, getOnlineUsers } from "../socket";
 import { hourlyTick } from "../services/simulation";
@@ -86,68 +86,70 @@ export async function registerGameRoutes(app: FastifyInstance) {
   });
 
   // Rejoindre une partie (par id) en liant le joueur au cookie invité
-  app.post("/api/games/:id/join", { preHandler: requireUser(app) }, async (req, reply) => {
+  app.post("/api/games/:id/join", { preHandler: requireUserOrGuest(app) }, async (req, reply) => {
     const paramsSchema = z.object({ id: z.string() });
     const bodySchema = z.object({ nickname: z.string().min(2).optional() });
     const { id } = paramsSchema.parse((req as any).params);
-    bodySchema.parse((req as any).body ?? {});
+    const body = bodySchema.safeParse((req as any).body ?? {});
 
     const game = await prisma.game.findUnique({ where: { id } });
     if (!game) return reply.status(404).send({ error: "Game not found" });
     // Partie unique: autoriser le join même si la partie est en cours
 
-    // Pseudo = email obligatoire (lié à l'utilisateur connecté)
-    const userEmail = (req as any).user?.email as string;
-    const trimmed = String(userEmail || "").trim();
-    
-    // IMPORTANT: Sur iOS/Safari, les cookies tiers ne fonctionnent pas
-    // On cherche TOUJOURS d'abord par nickname (email) pour voir si le joueur existe
-    const existingByNickname = await prisma.player.findFirst({ 
-      where: { gameId: id, nickname: { equals: trimmed, mode: 'insensitive' } }, 
-      select: { id: true, guestId: true } 
-    });
-    
+    const identity = (req as any).user ?? {};
+    const emailFromAuth = typeof identity.email === "string" ? identity.email.trim() : "";
+    const nicknameFromBody = body.success ? body.data.nickname?.trim() : undefined;
+
+    // Construire un pseudo exploitable même sans compte (guest)
+    let nickname = nicknameFromBody || emailFromAuth || "";
+
+    const cookieGuestId = (req as any).cookies?.["hm_guest"] as string | undefined;
+    let guestId = cookieGuestId || identity.guestId as string | undefined;
+    if (!guestId) {
+      const { nanoid } = await import("nanoid");
+      guestId = nanoid();
+      (reply as any).setCookie?.("hm_guest", guestId, {
+        path: "/",
+        httpOnly: true,
+        sameSite: "none",
+        secure: true,
+        maxAge: 60 * 60 * 24 * 365,
+      });
+    }
+
+    if (!nickname || nickname.length < 2) {
+      const suffix = guestId ? guestId.slice(-4).toUpperCase() : `${Math.floor(1000 + Math.random() * 9000)}`;
+      nickname = `Pilote ${suffix}`;
+    }
+
     let playerId: string;
-    let guestId: string;
-    
+
+    // Sur iOS/Safari, essayer d'abord de retrouver via le pseudo (email) pour garder la progression
+    const existingByNickname = nickname
+      ? await prisma.player.findFirst({
+          where: { gameId: id, nickname: { equals: nickname, mode: "insensitive" } },
+          select: { id: true, guestId: true },
+        })
+      : null;
+
     if (existingByNickname) {
-      // Joueur existant trouvé par email
       playerId = existingByNickname.id;
-      guestId = existingByNickname.guestId;
-      
-      // Mettre à jour le cookie (tentatif, peut échouer sur iOS)
-      if (guestId) {
-        (reply as any).setCookie?.("hm_guest", guestId, { 
-          path: "/", 
-          httpOnly: true, 
-          sameSite: "none", 
-          secure: true, 
-          maxAge: 60 * 60 * 24 * 365 
+      const resolvedGuest = existingByNickname.guestId || guestId;
+      if (resolvedGuest) {
+        guestId = resolvedGuest;
+        (reply as any).setCookie?.("hm_guest", guestId, {
+          path: "/",
+          httpOnly: true,
+          sameSite: "none",
+          secure: true,
+          maxAge: 60 * 60 * 24 * 365,
         });
       }
     } else {
-      // Nouveau joueur : essayer de lire le cookie, sinon en créer un
-      const cookieGuestId = (req as any).cookies?.["hm_guest"] as string | undefined;
-      
-      if (cookieGuestId) {
-        guestId = cookieGuestId;
-      } else {
-        const { nanoid } = await import("nanoid");
-        guestId = nanoid();
-        (reply as any).setCookie?.("hm_guest", guestId, { 
-          path: "/", 
-          httpOnly: true, 
-          sameSite: "none", 
-          secure: true, 
-          maxAge: 60 * 60 * 24 * 365 
-        });
-      }
-      
-      // Créer le nouveau joueur
       const created = await prisma.player.upsert({
-        where: { gameId_guestId: { gameId: id, guestId } },
-        update: { nickname: trimmed },
-        create: { nickname: trimmed, cash: INITIAL_CASH, netWorth: INITIAL_CASH, gameId: id, guestId, quizTokens: 15 },
+        where: { gameId_guestId: { gameId: id, guestId: guestId! } },
+        update: { nickname },
+        create: { nickname, cash: INITIAL_CASH, netWorth: INITIAL_CASH, gameId: id, guestId: guestId!, quizTokens: 15 },
         select: { id: true },
       });
       playerId = created.id;
