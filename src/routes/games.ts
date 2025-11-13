@@ -44,40 +44,45 @@ export async function registerGameRoutes(app: FastifyInstance) {
 
   // Créer une partie (option: créer aussi l'hôte pour le cookie invité courant)
   app.post("/api/games", async (req, reply) => {
-    const bodySchema = z.object({ hostNickname: z.string().min(2).optional() });
-    const { hostNickname } = bodySchema.parse((req as any).body ?? {});
-    const GLOBAL_CODE = process.env.GLOBAL_GAME_CODE || "GLOBAL";
-    let game: any = await prisma.game.findUnique({ where: { code: GLOBAL_CODE } });
-    if (!game) {
-      const infl = 0.01 + Math.random() * 0.04; // 1%..5%
-      game = await (prisma as any).game.create({ data: { code: GLOBAL_CODE, status: "running", startedAt: new Date(), inflationAnnual: infl, inflationIndex: 1 } });
-    } else if (game.status !== "running") {
-      game = await prisma.game.update({ where: { id: game.id }, data: { status: "running", startedAt: game.startedAt ?? new Date() } });
-    }
-
-    // Optionnel: créer l'hôte lié au cookie invité
-    let guestId = (req as any).cookies?.["hm_guest"] as string | undefined;
-    let hostPlayer: { id: string } | undefined;
-    if (hostNickname) {
-      if (!guestId) {
-        const { nanoid } = await import("nanoid");
-        guestId = nanoid();
-  (reply as any).setCookie?.("hm_guest", guestId, { path: "/", httpOnly: true, sameSite: "none", secure: true, maxAge: 60 * 60 * 24 * 365 });
+    try {
+      const bodySchema = z.object({ hostNickname: z.string().min(2).optional() });
+      const { hostNickname } = bodySchema.parse((req as any).body ?? {});
+      const GLOBAL_CODE = process.env.GLOBAL_GAME_CODE || "GLOBAL";
+      let game: any = await prisma.game.findUnique({ where: { code: GLOBAL_CODE } });
+      if (!game) {
+        const infl = 0.01 + Math.random() * 0.04; // 1%..5%
+        game = await (prisma as any).game.create({ data: { code: GLOBAL_CODE, status: "running", startedAt: new Date(), inflationAnnual: infl, inflationIndex: 1 } });
+      } else if (game.status !== "running") {
+        game = await prisma.game.update({ where: { id: game.id }, data: { status: "running", startedAt: game.startedAt ?? new Date() } });
       }
-      // vérifier unicité du pseudo
-      const trimmed = hostNickname.trim();
-  const dup = await prisma.player.findFirst({ where: { gameId: game.id, nickname: { equals: trimmed, mode: 'insensitive' } }, select: { id: true } });
-      if (dup) return reply.status(409).send({ error: "Pseudo déjà utilisé dans cette partie" });
-      hostPlayer = await prisma.player.upsert({
-        where: { gameId_guestId: { gameId: game.id, guestId } },
-        update: { nickname: trimmed },
-        create: { nickname: trimmed, cash: INITIAL_CASH, netWorth: INITIAL_CASH, gameId: game.id, guestId, quizTokens: 15 },
-        select: { id: true },
-      });
-    }
 
-    (app as any).io?.emit("lobby-update", { type: "created", gameId: game.id, code: game.code });
-    return reply.send({ id: game.id, code: game.code, status: game.status, playerId: hostPlayer?.id });
+      // Optionnel: créer l'hôte lié au cookie invité
+      let guestId = (req as any).cookies?.["hm_guest"] as string | undefined;
+      let hostPlayer: { id: string } | undefined;
+      if (hostNickname) {
+        if (!guestId) {
+          const { nanoid } = await import("nanoid");
+          guestId = nanoid();
+          (reply as any).setCookie?.("hm_guest", guestId, { path: "/", httpOnly: true, sameSite: "none", secure: true, maxAge: 60 * 60 * 24 * 365 });
+        }
+        // vérifier unicité du pseudo
+        const trimmed = hostNickname.trim();
+        const dup = await prisma.player.findFirst({ where: { gameId: game.id, nickname: { equals: trimmed, mode: 'insensitive' } }, select: { id: true } });
+        if (dup) return reply.status(409).send({ error: "Pseudo déjà utilisé dans cette partie" });
+        hostPlayer = await prisma.player.upsert({
+          where: { gameId_guestId: { gameId: game.id, guestId } },
+          update: { nickname: trimmed },
+          create: { nickname: trimmed, cash: INITIAL_CASH, netWorth: INITIAL_CASH, gameId: game.id, guestId, quizTokens: 15 },
+          select: { id: true },
+        });
+      }
+
+      (app as any).io?.emit("lobby-update", { type: "created", gameId: game.id, code: game.code });
+      return reply.send({ id: game.id, code: game.code, status: game.status, playerId: hostPlayer?.id });
+    } catch (error) {
+      console.error("[POST /api/games] Error:", error);
+      return reply.status(500).send({ error: "Internal server error", details: error instanceof Error ? error.message : String(error) });
+    }
   });
 
   // Rejoindre une partie (par id) en liant le joueur au cookie invité
