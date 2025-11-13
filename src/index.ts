@@ -181,11 +181,13 @@ async function bootstrap() {
     if (["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
       const url = (req as any).url as string;
       
-      // Exemptions: auth endpoints et quiz (qui utilisent X-Player-ID pour sécurité)
+      // Exemptions: auth endpoints, quiz, drag et join (qui utilisent X-Player-ID ou origine autorisée)
       if (url.startsWith("/api/auth/login") || 
           url.startsWith("/api/auth/register") || 
           url.startsWith("/api/auth/logout") ||
-          url.includes("/quiz/")) {
+          url.includes("/quiz/") ||
+          url.includes("/drag/") ||
+          url.includes("/join")) {
         return;
       }
       
