@@ -12,6 +12,7 @@
     "postinstall": "prisma generate || echo prisma-generate-skipped",
     "prisma:generate": "prisma generate",
     "prisma:deploy": "prisma migrate deploy",
+    "prisma:resolve-failed": "tsx scripts/resolve_failed_migrations.ts",
     "prisma:migrate": "prisma migrate dev --name init",
     "seed": "tsx prisma/seed.ts",
     "purge:old": "tsx scripts/purge_old_templates.ts",
