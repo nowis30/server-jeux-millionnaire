@@ -190,6 +190,7 @@ async function bootstrap() {
           url.includes("/quiz/") ||
           url.includes("/drag/") ||
           url.includes("/join")) {
+        req.log.info({ url, method }, "CSRF check skipped (exempt endpoint)");
         return;
       }
       
@@ -197,7 +198,10 @@ async function bootstrap() {
       const tokenHeader = (req.headers?.["x-csrf-token"] as string) || (req.headers?.["x-xsrf-token"] as string);
       
       // Si le token correspond au cookie -> OK
-      if (csrfCookie && tokenHeader && tokenHeader === csrfCookie) return;
+      if (csrfCookie && tokenHeader && tokenHeader === csrfCookie) {
+        req.log.info({ url, method }, "CSRF check passed (token match)");
+        return;
+      }
       
       // Tolérance: si l'origine est autorisée et qu'une session utilisateur est présente (hm_auth),
       // on autorise sans CSRF pour compatibilité avec les navigateurs bloquant les cookies tiers.
@@ -218,10 +222,20 @@ async function bootstrap() {
       const hasPlayerId = Boolean(req.headers?.["x-player-id"]);
       
       // Tolérer si origine autorisée ET (header CSRF présent OU session authentifiée OU guest/playerId présent)
-      if (allowed && tokenHeader) return;
-      if (allowed && hasAuth) return;
-      if (allowed && (hasGuest || hasPlayerId)) return;
+      if (allowed && tokenHeader) {
+        req.log.info({ url, method, origin }, "CSRF check passed (allowed origin + token header)");
+        return;
+      }
+      if (allowed && hasAuth) {
+        req.log.info({ url, method, origin }, "CSRF check passed (allowed origin + auth cookie)");
+        return;
+      }
+      if (allowed && (hasGuest || hasPlayerId)) {
+        req.log.info({ url, method, origin }, "CSRF check passed (allowed origin + guest/playerId)");
+        return;
+      }
       
+      req.log.warn({ url, method, origin, allowed, hasAuth, hasGuest, hasPlayerId, csrfCookie: !!csrfCookie, tokenHeader: !!tokenHeader }, "CSRF check failed");
       return reply.status(403).send({ error: "CSRF token invalid" });
     }
   });
