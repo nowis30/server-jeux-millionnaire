@@ -112,6 +112,8 @@ async function bootstrap() {
       if (env.CLIENT_ORIGINS.includes(origin)) return cb(null, true);
       // autoriser tous les déploiements Vercel en preview
       if (/\.vercel\.app$/.test(origin)) return cb(null, true);
+      // autoriser GitHub Pages (ex: https://nowis30.github.io)
+      if (origin === "https://nowis30.github.io" || origin.endsWith(".github.io")) return cb(null, true);
       // autoriser localhost en dev (http et https, avec/sans port)
       if (origin.startsWith("http://localhost:")) return cb(null, true);
       if (origin.startsWith("https://localhost:")) return cb(null, true);
@@ -200,6 +202,8 @@ async function bootstrap() {
         !origin ||
         env.CLIENT_ORIGINS.includes(origin) ||
         /\.vercel\.app$/.test(origin) ||
+        origin === "https://nowis30.github.io" ||
+        origin.endsWith(".github.io") ||
         origin.startsWith("http://localhost:") ||
         origin.startsWith("https://localhost:") ||
         origin === "http://localhost" ||
