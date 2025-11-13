@@ -16,6 +16,10 @@ const LoginSchema = z.object({
   password: z.string().min(6),
 });
 
+const GuestTokenSchema = z.object({
+  guestId: z.string().regex(/^[a-zA-Z0-9_-]{8,64}$/).optional(),
+});
+
 export async function registerAuthRoutes(app: FastifyInstance) {
   // JWT plugin
   if (!app.hasDecorator("jwt" as any)) {
@@ -40,7 +44,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       data: { email: emailNorm, passwordHash, isAdmin, emailVerified: true } 
     });
     // Créer un token JWT et connecter l'utilisateur immédiatement
-    const token = (app as any).jwt.sign({ sub: user.id, email: user.email, isAdmin: user.isAdmin }, { expiresIn: "12h" });
+    const token = (app as any).jwt.sign({ kind: "user", sub: user.id, email: user.email, isAdmin: user.isAdmin }, { expiresIn: "12h" });
     reply.setCookie("hm_auth", token, { path: "/", httpOnly: true, sameSite: "none", secure: true });
     // Rafraîchir CSRF
     const csrf = Math.random().toString(36).slice(2);
@@ -63,12 +67,24 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     if (!(user as any).emailVerified && !user.isAdmin && !env.SKIP_EMAIL_VERIFICATION) {
       return reply.status(403).send({ error: "Email non vérifié. Consultez votre boîte de réception ou demandez un nouvel email de vérification." });
     }
-    const token = (app as any).jwt.sign({ sub: user.id, email: user.email, isAdmin: user.isAdmin }, { expiresIn: "12h" });
+    const token = (app as any).jwt.sign({ kind: "user", sub: user.id, email: user.email, isAdmin: user.isAdmin }, { expiresIn: "12h" });
     reply.setCookie("hm_auth", token, { path: "/", httpOnly: true, sameSite: "none", secure: true });
     // rafraîchir CSRF
     const csrf = Math.random().toString(36).slice(2);
     reply.setCookie("hm_csrf", csrf, { path: "/", httpOnly: false, sameSite: "none", secure: true });
     return reply.send({ id: user.id, email: user.email, isAdmin: user.isAdmin, token });
+  });
+
+  // guest token: JWT portable pour invités (bypass cookies third-party)
+  app.post("/api/auth/guest-token", async (req, reply) => {
+    const parsed = GuestTokenSchema.parse((req as any).body ?? {});
+    let guestId = parsed.guestId;
+    if (!guestId) {
+      guestId = nanoid();
+    }
+    const expiresInSeconds = 60 * 60 * 24 * 30; // 30 jours
+    const token = (app as any).jwt.sign({ kind: "guest", guestId }, { expiresIn: expiresInSeconds });
+    return reply.send({ token, guestId, expiresInSeconds });
   });
 
   // Vérifier email (via token)
@@ -210,15 +226,21 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       const tokenCookie = (req as any).cookies?.["hm_auth"];
       const token = bearer || tokenCookie;
       if (!token) return reply.status(401).send({ error: "Unauthenticated" });
-      const payload = (app as any).jwt.verify(token) as { sub: string; email: string; isAdmin: boolean; iat?: number };
-      // Barrière anti-tokens anciens (même sans exp) : max 12h
+      const payload = (app as any).jwt.verify(token) as { kind?: string; sub?: string; email?: string; isAdmin?: boolean; iat?: number; guestId?: string };
+
+      if (payload.kind === "guest") {
+        if (!payload.guestId) return reply.status(401).send({ error: "Unauthenticated" });
+        return reply.send({ guest: true, guestId: payload.guestId });
+      }
+
+      // Compat: anciens tokens n'ont pas de kind, on les traite comme utilisateurs
       const nowSec = Math.floor(Date.now() / 1000);
       const iat = payload.iat ?? 0;
       const maxAgeSec = 12 * 60 * 60;
-      if (!iat || (nowSec - iat) > maxAgeSec) {
+      if (!iat || (nowSec - iat) > maxAgeSec || !payload?.sub || !payload?.email) {
         return reply.status(401).send({ error: "Unauthenticated" });
       }
-      return reply.send({ id: payload.sub, email: payload.email, isAdmin: payload.isAdmin });
+      return reply.send({ id: payload.sub, email: payload.email, isAdmin: !!payload.isAdmin });
     } catch (e) {
       return reply.status(401).send({ error: "Unauthenticated" });
     }
@@ -244,7 +266,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
         return reply.send({ refreshed: false, remainingSeconds: remaining });
       }
       // Émettre un nouveau token 12h
-      const newToken = (app as any).jwt.sign({ sub: payload.sub, email: payload.email, isAdmin: payload.isAdmin }, { expiresIn: "12h" });
+      const newToken = (app as any).jwt.sign({ kind: "user", sub: payload.sub, email: payload.email, isAdmin: payload.isAdmin }, { expiresIn: "12h" });
       reply.setCookie("hm_auth", newToken, { path: "/", httpOnly: true, sameSite: "none", secure: true });
       return reply.send({ refreshed: true, token: newToken });
     } catch (e) {
@@ -378,8 +400,10 @@ export function requireAdmin(app: FastifyInstance) {
       const tokenCookie = req.cookies?.["hm_auth"];
       const raw = bearer || tokenCookie;
       if (!raw) return reply.status(401).send({ error: "Unauthenticated" });
-      const payload = (app as any).jwt.verify(raw) as { sub: string; email: string; isAdmin: boolean };
-      if (!payload.isAdmin) return reply.status(403).send({ error: "Forbidden" });
+      const payload = (app as any).jwt.verify(raw) as { kind?: string; sub?: string; email?: string; isAdmin?: boolean };
+      if (payload.kind === "guest" || !payload?.isAdmin) {
+        return reply.status(403).send({ error: "Forbidden" });
+      }
       (req as any).user = payload;
     } catch (e) {
       return reply.status(401).send({ error: "Unauthenticated" });
@@ -395,7 +419,10 @@ export function requireUser(app: FastifyInstance) {
       const tokenCookie = req.cookies?.["hm_auth"];
       const raw = bearer || tokenCookie;
       if (!raw) return reply.status(401).send({ error: "Unauthenticated" });
-      const payload = (app as any).jwt.verify(raw) as { sub: string; email: string; isAdmin: boolean };
+      const payload = (app as any).jwt.verify(raw) as { kind?: string; sub?: string; email?: string; isAdmin?: boolean };
+      if (payload.kind === "guest" || !payload?.sub || !payload?.email) {
+        return reply.status(401).send({ error: "Unauthenticated" });
+      }
       (req as any).user = payload;
     } catch (e) {
       return reply.status(401).send({ error: "Unauthenticated" });
@@ -417,9 +444,15 @@ export function requireUserOrGuest(app: FastifyInstance) {
       if (raw) {
         // Si on a un token JWT, l'utiliser
         try {
-          const payload = (app as any).jwt.verify(raw) as { sub: string; email: string; isAdmin: boolean };
-          (req as any).user = payload;
-          return; // Authentification réussie via JWT
+          const payload = (app as any).jwt.verify(raw) as { kind?: string; sub?: string; email?: string; isAdmin?: boolean; guestId?: string };
+          if (payload.kind === "guest" && payload.guestId) {
+            (req as any).user = { guestId: payload.guestId, tokenKind: "guest" };
+            return;
+          }
+          if (!payload.kind || payload.kind === "user") {
+            (req as any).user = payload;
+            return; // Authentification réussie via JWT user
+          }
         } catch (e) {
           // Token invalide, continuer avec le cookie guest
         }

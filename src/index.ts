@@ -191,9 +191,10 @@ async function bootstrap() {
       }
       
       // Exemptions: auth endpoints, quiz, drag et join
-      if (url.startsWith("/api/auth/login") || 
+        if (url.startsWith("/api/auth/login") || 
           url.startsWith("/api/auth/register") || 
           url.startsWith("/api/auth/logout") ||
+          url.startsWith("/api/auth/guest-token") ||
           url.includes("/quiz/") ||
           url.includes("/drag/") ||
           url.includes("/join")) {
