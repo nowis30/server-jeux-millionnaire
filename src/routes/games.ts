@@ -414,26 +414,38 @@ export async function registerGameRoutes(app: FastifyInstance) {
 
   // État de la partie
   app.get("/api/games/:id/state", async (req, reply) => {
-    const paramsSchema = z.object({ id: z.string() });
-    const { id } = paramsSchema.parse((req as any).params);
-    const game = await prisma.game.findUnique({
-      where: { id },
-      include: { players: true },
-    });
-    if (!game) return reply.status(404).send({ error: "Game not found" });
-    return reply.send({
-      id: game.id,
-      code: game.code,
-      status: game.status,
-      startedAt: game.startedAt,
-      players: game.players.map((p: typeof game.players[number]) => ({
-        id: p.id,
-        nickname: p.nickname,
-        cash: p.cash,
-        netWorth: p.netWorth,
-      })),
-      serverTime: new Date().toISOString(),
-    });
+    try {
+      const paramsSchema = z.object({ id: z.string() });
+      const { id } = paramsSchema.parse((req as any).params);
+
+      // Sélectionne explicitement les champs nécessaires pour éviter toute
+      // sérialisation d'objets volumineux ou de types non pris en charge.
+      const game = await prisma.game.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          code: true,
+          status: true,
+          startedAt: true,
+          players: {
+            select: { id: true, nickname: true, cash: true, netWorth: true },
+          },
+        },
+      });
+      if (!game) return reply.status(404).send({ error: "Game not found" });
+
+      return reply.send({
+        id: game.id,
+        code: game.code,
+        status: game.status,
+        startedAt: game.startedAt,
+        players: game.players,
+        serverTime: new Date().toISOString(),
+      });
+    } catch (err: any) {
+      (req as any).log?.error?.({ err }, "Erreur /api/games/:id/state");
+      return reply.status(500).send({ error: "Internal Server Error", details: err?.message });
+    }
   });
 
   // Résumé de fin de partie
