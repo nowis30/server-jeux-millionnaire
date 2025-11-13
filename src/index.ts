@@ -9,6 +9,8 @@ import cron from "node-cron";
 import { hourlyTick, annualUpdate, nightlyRefresh } from "./services/simulation";
 import { dailyMarketTick, ensureMarketHistory } from "./services/market";
 import { registerPropertyRoutes } from "./routes/properties";
+
+// Force rebuild: GitHub Pages CSRF fix deployed 2025-11-13
 import { registerMarketRoutes } from "./routes/markets";
 import { registerListingRoutes } from "./routes/listings";
 import { prisma } from "./prisma";
