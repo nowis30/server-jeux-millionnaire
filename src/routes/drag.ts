@@ -6,6 +6,9 @@ import { resolvePlayerForRequest } from "./helpers/player";
 
 // Paramètres serveurs (faciles à ajuster)
 const DRAG_BASE_REWARD = 50_000; // cohérent avec le client drag
+const DRAG_UPGRADE_COST = 1_000_000;
+const DRAG_ENGINE_MAX = 20;
+const DRAG_TRANSMISSION_MAX = 5;
 const DRAG_REWARD_COOLDOWN_MS = 5_000; // anti‑spam basique entre 2 runs
 const DRAG_MIN_TIME_MS_STAGE1 = 5500; // temps minimal plausible à l'étape 1
 const DRAG_MIN_TIME_REDUCTION_PER_STAGE = 50; // assouplissement progressif
@@ -33,7 +36,11 @@ export async function registerDragRoutes(app: FastifyInstance) {
     // Lire progression (via Prisma any pour compat compatibilité si client non régénéré)
     const p = await (prisma as any).player.findUnique({
       where: { id: player.id },
-      select: { id: true, nickname: true, cash: true, netWorth: true, dragStage: true, dragLastRewardAt: true },
+      select: {
+        id: true, nickname: true, cash: true, netWorth: true,
+        dragStage: true, dragLastRewardAt: true,
+        dragEngineLevel: true, dragTransmissionLevel: true,
+      },
     });
     const now = Date.now();
     const last = p?.dragLastRewardAt ? new Date(p.dragLastRewardAt).getTime() : 0;
@@ -43,6 +50,8 @@ export async function registerDragRoutes(app: FastifyInstance) {
       player: { id: p.id, nickname: p.nickname, cash: p.cash, netWorth: p.netWorth },
       drag: {
         stage: Number(p.dragStage ?? 1),
+        engineLevel: Number(p.dragEngineLevel ?? 1),
+        transmissionLevel: Number(p.dragTransmissionLevel ?? 1),
         tuning: { engineMax: 1.6, nitroPowerMax: 1.8, nitroChargesMax: 3 },
         cooldowns: { rewardCooldownSeconds: remaining },
       },
@@ -163,5 +172,99 @@ export async function registerDragRoutes(app: FastifyInstance) {
       select: { stage: true, elapsedMs: true, win: true, perfectShifts: true, grantedReward: true, createdAt: true },
     });
     return reply.send({ history: runs });
+  });
+
+  // POST /api/games/:gameId/drag/upgrade/:type  (type: 'engine' | 'transmission')
+  app.post("/api/games/:gameId/drag/upgrade/:type", { preHandler: requireUserOrGuest(app) }, async (req, reply) => {
+    const paramsSchema = z.object({ gameId: z.string(), type: z.enum(["engine", "transmission"]) });
+    const { gameId, type } = paramsSchema.parse((req as any).params);
+
+    const player = await resolvePlayerForRequest(app, req, gameId);
+    if (!player) return reply.status(404).send({ error: "Player not found" });
+
+    // Lire niveaux actuels et cash
+    const p = await (prisma as any).player.findUnique({
+      where: { id: player.id },
+      select: { cash: true, dragEngineLevel: true, dragTransmissionLevel: true },
+    });
+    if (!p) return reply.status(404).send({ error: "Player not found" });
+
+    const currentEngine = Number(p.dragEngineLevel ?? 1);
+    const currentTrans = Number(p.dragTransmissionLevel ?? 1);
+
+    if (type === "engine" && currentEngine >= DRAG_ENGINE_MAX) {
+      return reply.status(400).send({ error: "Moteur déjà au niveau maximum" });
+    }
+    if (type === "transmission" && currentTrans >= DRAG_TRANSMISSION_MAX) {
+      return reply.status(400).send({ error: "Transmission déjà au niveau maximum" });
+    }
+
+    if (Number(p.cash) < DRAG_UPGRADE_COST) {
+      return reply.status(400).send({ error: "Fonds insuffisants" });
+    }
+
+    // Appliquer l'upgrade et déduire le coût
+    const data: any = { cash: { decrement: DRAG_UPGRADE_COST } };
+    if (type === "engine") data.dragEngineLevel = currentEngine + 1;
+    if (type === "transmission") data.dragTransmissionLevel = currentTrans + 1;
+
+    const updated = await (prisma as any).player.update({
+      where: { id: player.id },
+      data,
+      select: { cash: true, dragEngineLevel: true, dragTransmissionLevel: true },
+    });
+
+    return reply.send({
+      ok: true,
+      player: { cash: updated.cash },
+      drag: {
+        engineLevel: Number(updated.dragEngineLevel ?? 1),
+        transmissionLevel: Number(updated.dragTransmissionLevel ?? 1),
+      },
+    });
+  });
+
+  // GET /api/games/:gameId/drag/opponents?limit=50 — liste d'adversaires (autres joueurs) avec meilleur temps
+  app.get("/api/games/:gameId/drag/opponents", { preHandler: requireUserOrGuest(app) }, async (req, reply) => {
+    const paramsSchema = z.object({ gameId: z.string() });
+    const querySchema = z.object({ limit: z.coerce.number().int().min(1).max(200).default(50) });
+    const { gameId } = paramsSchema.parse((req as any).params);
+    const { limit } = querySchema.parse((req as any).query ?? {});
+
+    const player = await resolvePlayerForRequest(app, req, gameId);
+    if (!player) return reply.status(404).send({ error: "Player not found" });
+
+    // Agréger par joueur: meilleur temps (min elapsedMs) pour cette partie, exclure le joueur courant
+    const groups = await (prisma as any).dragRun.groupBy({
+      by: ["playerId"],
+      where: { gameId, NOT: { playerId: player.id } },
+      _min: { elapsedMs: true },
+      _max: { createdAt: true },
+      orderBy: { _min: { elapsedMs: "asc" } },
+      take: limit,
+    });
+    const ids = groups.map((g: any) => g.playerId);
+    if (ids.length === 0) return reply.send({ opponents: [] });
+
+    const players = await (prisma as any).player.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, nickname: true, dragEngineLevel: true, dragTransmissionLevel: true },
+    });
+    const map = new Map<string, any>();
+    players.forEach((p: any) => map.set(p.id, p));
+
+    const opponents = groups.map((g: any) => {
+      const p = map.get(g.playerId);
+      return {
+        playerId: g.playerId,
+        nickname: p?.nickname || 'Joueur',
+        bestMs: Number(g._min?.elapsedMs ?? 0),
+        lastAt: g._max?.createdAt || null,
+        engineLevel: Number(p?.dragEngineLevel ?? 1),
+        transmissionLevel: Number(p?.dragTransmissionLevel ?? 1),
+      };
+    });
+
+    return reply.send({ opponents });
   });
 }

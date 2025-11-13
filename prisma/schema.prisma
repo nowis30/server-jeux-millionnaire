@@ -66,6 +66,9 @@ model Player {
   dragLastRunAt    DateTime?
   dragBestTimeMs   Int?
   dragRuns         DragRun[]
+  // Upgrades Drag
+  dragEngineLevel       Int @default(1)
+  dragTransmissionLevel Int @default(1)
 
   @@unique([gameId, guestId])
   @@unique([gameId, nickname])
