@@ -152,6 +152,25 @@ Sur Render.com:
 2. Chercher **"External Database URL"** (PAS "Internal")
 3. Copier l'URL qui ressemble à: `postgresql://user:pass@host.ohio-postgres.render.com/dbname`
 
+### 4. Forcer (ou créer) un mot de passe utilisateur
+
+Disponible via `scripts/set-password.js`:
+
+```bash
+# Charger les variables nécessaires dans scripts/.env (DATABASE_URL, etc.)
+node scripts/set-password.js utilisateur@example.com "NouveauMotDePasse123!"
+
+# Optionnel : ajouter --admin pour promouvoir le compte
+node scripts/set-password.js admin@example.com "MotDePasseSolide!" --admin
+```
+
+Ce script:
+- Normalise l'email en minuscule afin d'éviter les doublons.
+- Crée le compte s'il n'existe pas encore, ou met simplement à jour le `passwordHash`.
+- Marque l'email comme vérifié et peut promouvoir l'utilisateur (`--admin`).
+
+Pratique pour récupérer un accès admin en urgence ou aligner les mots de passe utilisés par Drag/GitHub Pages sans passer par l'email « mot de passe oublié ».
+
 ## Endpoints API
 
 ### Parties
