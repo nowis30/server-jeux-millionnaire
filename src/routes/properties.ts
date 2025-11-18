@@ -208,7 +208,7 @@ export async function registerPropertyRoutes(app: FastifyInstance) {
 
       // Récupérer les templates déjà ACHETÉS dans cette partie pour les exclure de la disponibilité
       const purchased = await app.prisma.propertyHolding.findMany({ where: { gameId }, select: { templateId: true } });
-      const purchasedIds = new Set(purchased.map(p => p.templateId));
+      const purchasedIds = new Set(purchased.map((p: { templateId: string }) => p.templateId));
 
       // Compter la disponibilité par type (basé sur units) excluant les achetés
       async function countAvailable(units: number) {
@@ -493,7 +493,7 @@ export async function registerPropertyRoutes(app: FastifyInstance) {
           } catch {}
           // Exclure les templates déjà achetés dans cette partie
           const purchased = await app.prisma.propertyHolding.findMany({ where: { gameId: params.gameId }, select: { templateId: true } });
-          const purchasedIds = new Set(purchased.map(p => p.templateId));
+          const purchasedIds = new Set(purchased.map((p: { templateId: string }) => p.templateId));
           const desiredDefault: Record<number, number> = { 1:5, 2:5, 3:5, 6:5, 50:5, 100:5 };
           const deficits: Record<number, number> = {};
           for (const [uStr, need] of Object.entries(desiredDefault)) {

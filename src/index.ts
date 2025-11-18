@@ -1,4 +1,5 @@
 import Fastify from "fastify";
+import type { FastifyRequest, FastifyReply, FastifyError } from "fastify";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import cookie from "@fastify/cookie";
@@ -108,7 +109,7 @@ async function bootstrap() {
       "Authorization",
       "Set-Cookie",
     ],
-    origin: (origin, cb) => {
+    origin: (origin: string | undefined, cb: (err: Error | null, allow: boolean) => void) => {
       // autoriser requêtes serveur-à-serveur et outils (origin nul)
       if (!origin) return cb(null, true);
       if (env.CLIENT_ORIGINS.includes(origin)) return cb(null, true);
@@ -135,7 +136,7 @@ async function bootstrap() {
   app.decorate("prisma", prisma);
 
   // Auth invité par cookie: attribuer un UUID si absent
-  app.addHook("onRequest", async (request, reply) => {
+  app.addHook("onRequest", async (request: FastifyRequest, reply: FastifyReply) => {
     const COOKIE_NAME = "hm_guest";
     const existing = (request as any).cookies?.[COOKIE_NAME];
     if (!existing) {
@@ -168,7 +169,7 @@ async function bootstrap() {
   });
 
   // Gestionnaire d'erreurs standardisé (Zod -> 400)
-  app.setErrorHandler((err, req, reply) => {
+  app.setErrorHandler((err: FastifyError, req: FastifyRequest, reply: FastifyReply) => {
     const isZod = (err as any)?.issues && (err as any)?.name === 'ZodError';
     if (isZod) {
       return reply.status(400).send({ error: 'Validation error', details: (err as any).issues });
@@ -178,7 +179,7 @@ async function bootstrap() {
   });
 
   // Vérification CSRF pour méthodes non sûres
-  app.addHook("preHandler", async (req, reply) => {
+  app.addHook("preHandler", async (req: FastifyRequest, reply: FastifyReply) => {
     const method = (req.method || "GET").toUpperCase();
     if (["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
       const url = (req as any).url as string;

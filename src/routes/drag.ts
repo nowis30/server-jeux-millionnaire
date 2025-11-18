@@ -1,4 +1,4 @@
-import { FastifyInstance } from "fastify";
+import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { z } from "zod";
 import { prisma } from "../prisma";
 import { requireUserOrGuest } from "./auth";
@@ -26,7 +26,7 @@ function computeReward(win: boolean, _stage: number, _perfectShifts: number): nu
 
 export async function registerDragRoutes(app: FastifyInstance) {
   // GET /api/games/:gameId/drag/session
-  app.get("/api/games/:gameId/drag/session", { preHandler: requireUserOrGuest(app) }, async (req, reply) => {
+  app.get("/api/games/:gameId/drag/session", { preHandler: requireUserOrGuest(app) }, async (req: FastifyRequest, reply: FastifyReply) => {
     try {
       const paramsSchema = z.object({ gameId: z.string() });
       const { gameId } = paramsSchema.parse((req as any).params);
@@ -72,7 +72,7 @@ export async function registerDragRoutes(app: FastifyInstance) {
   });
 
   // POST /api/games/:gameId/drag/result
-  app.post("/api/games/:gameId/drag/result", { preHandler: requireUserOrGuest(app) }, async (req, reply) => {
+  app.post("/api/games/:gameId/drag/result", { preHandler: requireUserOrGuest(app) }, async (req: FastifyRequest, reply: FastifyReply) => {
     const paramsSchema = z.object({ gameId: z.string() });
     const bodySchema = z.object({
       stage: z.number().int().min(1).max(200),
@@ -169,7 +169,7 @@ export async function registerDragRoutes(app: FastifyInstance) {
   });
 
   // GET /api/games/:gameId/drag/history?limit=20
-  app.get("/api/games/:gameId/drag/history", { preHandler: requireUserOrGuest(app) }, async (req, reply) => {
+  app.get("/api/games/:gameId/drag/history", { preHandler: requireUserOrGuest(app) }, async (req: FastifyRequest, reply: FastifyReply) => {
     const paramsSchema = z.object({ gameId: z.string() });
     const querySchema = z.object({ limit: z.coerce.number().int().min(1).max(100).default(20) });
     const { gameId } = paramsSchema.parse((req as any).params);
@@ -188,7 +188,7 @@ export async function registerDragRoutes(app: FastifyInstance) {
   });
 
   // POST /api/games/:gameId/drag/upgrade/:type  (type: 'engine' | 'transmission')
-  app.post("/api/games/:gameId/drag/upgrade/:type", { preHandler: requireUserOrGuest(app) }, async (req, reply) => {
+  app.post("/api/games/:gameId/drag/upgrade/:type", { preHandler: requireUserOrGuest(app) }, async (req: FastifyRequest, reply: FastifyReply) => {
     const paramsSchema = z.object({ gameId: z.string(), type: z.enum(["engine", "transmission"]) });
     const { gameId, type } = paramsSchema.parse((req as any).params);
 
@@ -238,7 +238,7 @@ export async function registerDragRoutes(app: FastifyInstance) {
   });
 
   // GET /api/games/:gameId/drag/opponents?limit=50 — liste d'adversaires (autres joueurs) avec meilleur temps
-  app.get("/api/games/:gameId/drag/opponents", { preHandler: requireUserOrGuest(app) }, async (req, reply) => {
+  app.get("/api/games/:gameId/drag/opponents", { preHandler: requireUserOrGuest(app) }, async (req: FastifyRequest, reply: FastifyReply) => {
     const paramsSchema = z.object({ gameId: z.string() });
     const querySchema = z.object({ limit: z.coerce.number().int().min(1).max(200).default(50) });
     const { gameId } = paramsSchema.parse((req as any).params);

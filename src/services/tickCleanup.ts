@@ -23,13 +23,13 @@ export async function cleanupMarketTicks(gameId: string): Promise<number> {
     }
     
     // 2. Garder les 100 derniers (plus récents)
-    const keepRecent = allTicks.slice(0, 100).map(t => t.id);
+    const keepRecent = allTicks.slice(0, 100).map((t: { id: string }) => t.id);
     
     // 3. Pour les anciens (index 100+), garder 1 sur 100
     const oldTicks = allTicks.slice(100);
     const keepSampled = oldTicks
-      .filter((_, index) => index % 100 === 0)
-      .map(t => t.id);
+      .filter((_: { id: string }, index: number) => index % 100 === 0)
+      .map((t: { id: string }) => t.id);
     
     // 4. Combiner les deux listes
     const keepIds = [...keepRecent, ...keepSampled];

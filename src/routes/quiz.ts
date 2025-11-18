@@ -67,6 +67,144 @@ async function getUsedCategoriesForSession(sessionId: string): Promise<Set<strin
 }
 
 // Sélection d'une question non vue par difficulté en mélangeant les sujets
+// NOUVELLE VERSION: Supporte filtrage par catégories sélectionnées
+async function selectUnseenQuestionFiltered(
+  playerId: string,
+  difficulty: 'easy' | 'medium' | 'hard',
+  sessionId?: string,
+  selectedCategories?: string[]
+): Promise<any> {
+  // Si aucune catégorie spécifiée, utiliser toutes les catégories
+  const categoryFilter = selectedCategories && selectedCategories.length > 0
+    ? { category: { in: selectedCategories } }
+    : {};
+
+  // Identique à selectUnseenQuestion mais avec filtre de catégories
+  const usedInSessionGlobal = await prisma.quizAttempt.findMany({
+    where: { sessionId: sessionId || '__none__' },
+    select: { questionId: true },
+  });
+  const usedIdsAll = new Set(usedInSessionGlobal.map((a: { questionId: string }) => a.questionId));
+
+  // Si tout est vu globalement dans TOUTES CATEGORIES, réinitialiser le cache des vues du joueur pour les catégories sélectionnées
+  const totalInCategories = await prisma.quizQuestion.count({ 
+    where: { difficulty, ...categoryFilter } 
+  });
+  
+  const seenForPlayer = await prisma.quizQuestionSeen.findMany({ 
+    where: { 
+      playerId, 
+      question: { difficulty, ...categoryFilter } 
+    }, 
+    select: { questionId: true } 
+  });
+
+  if (totalInCategories > 0 && seenForPlayer.length >= totalInCategories) {
+    // Réinitialiser les vues pour ce joueur dans ces catégories
+    await prisma.quizQuestionSeen.deleteMany({
+      where: { 
+        playerId,
+        question: { difficulty, ...categoryFilter }
+      },
+    });
+    // Retourner une question aléatoire des catégories sélectionnées
+    const count = await prisma.quizQuestion.count({ 
+      where: { difficulty, ...categoryFilter } 
+    });
+    if (count === 0) return null;
+    const skip = Math.floor(Math.random() * count);
+    const q = await prisma.quizQuestion.findFirst({ 
+      where: { difficulty, ...categoryFilter }, 
+      skip 
+    });
+    if (q) return q;
+    return null;
+  }
+
+  // Récupérer dynamiquement les catégories disponibles pour cette difficulté (filtrées)
+  const distinctCats = await prisma.quizQuestion.findMany({
+    where: { difficulty, ...categoryFilter },
+    distinct: ["category"],
+    select: { category: true },
+  });
+  let categoriesAll = distinctCats.map((c: { category: string }) => c.category).filter(Boolean) as string[];
+  
+  // Ordre des catégories: celles pas encore vues dans la session d'abord
+  let categoriesOrder: string[] = categoriesAll;
+  if (sessionId) {
+    const usedInSession = await getUsedCategoriesForSession(sessionId);
+    const notUsed = categoriesAll.filter((c) => !usedInSession.has(c));
+    const alreadyUsed = categoriesAll.filter((c) => usedInSession.has(c));
+    categoriesOrder = [...shuffle(notUsed), ...shuffle(alreadyUsed)];
+  } else {
+    categoriesOrder = shuffle(categoriesOrder);
+  }
+
+  // Préparer signatures des récentes questions pour filtrage sémantique
+  const recent = sessionId ? await getRecentSessionQuestions(sessionId, 7) : [];
+  const recentSigs = recent.map(r => ({ id: r.id, sig: quickSignature(r.question) }));
+
+  // Essayer de choisir une question non vue par catégorie dans l'ordre calculé
+  for (const category of categoriesOrder) {
+    const totalCountCat = await prisma.quizQuestion.count({ where: { difficulty, category } });
+    if (totalCountCat === 0) continue;
+
+    const seenInCat = await prisma.quizQuestionSeen.findMany({
+      where: { playerId, question: { difficulty, category } },
+      select: { questionId: true },
+    });
+    const seenIdsCat = seenInCat.map((s: { questionId: string }) => s.questionId);
+    const excludedIdsCat = new Set([...seenIdsCat, ...Array.from(usedIdsAll)]);
+    const unseenCountCat = totalCountCat - seenIdsCat.length;
+    if (unseenCountCat <= 0) continue;
+
+    const skip = Math.floor(Math.random() * unseenCountCat);
+    let attempt = await prisma.quizQuestion.findFirst({
+      where: { difficulty, category, id: { notIn: Array.from(excludedIdsCat) } },
+      skip,
+    });
+    if (attempt) {
+      const sigAttempt = quickSignature(attempt.question);
+      // Refuser si trop similaire (>= seuil) à une des récentes
+      const tooClose = recentSigs.some(r => similarity(sigAttempt, r.sig) >= SIMILARITY_THRESHOLD);
+      if (tooClose) {
+        // Réessayer avec une autre question de cette catégorie si possible
+        const alternativesCount = unseenCountCat - 1;
+        if (alternativesCount > 0) {
+          const altSkip = Math.floor(Math.random() * alternativesCount);
+          const alt = await prisma.quizQuestion.findFirst({
+            where: { difficulty, category, id: { notIn: Array.from(excludedIdsCat) } },
+            skip: altSkip,
+          });
+          if (alt && similarity(quickSignature(alt.question), sigAttempt) < SIMILARITY_THRESHOLD) {
+            attempt = alt;
+          }
+        }
+        // Si toujours trop similaire, on l'accepte quand même (pas d'autre choix)
+      }
+      return attempt;
+    }
+  }
+
+  // Aucune catégorie n'a de questions non vues
+  // Fallback: réinitialiser les vues et retourner une question aléatoire
+  await prisma.quizQuestionSeen.deleteMany({
+    where: { 
+      playerId,
+      question: { difficulty, ...categoryFilter }
+    },
+  });
+  const count = await prisma.quizQuestion.count({ 
+    where: { difficulty, ...categoryFilter } 
+  });
+  if (count === 0) return null;
+  const skip = Math.floor(Math.random() * count);
+  return await prisma.quizQuestion.findFirst({ 
+    where: { difficulty, ...categoryFilter }, 
+    skip 
+  });
+}
+
 // Calcule une signature normalisée pour comparer la similarité rapide (Jaccard tokens + trigrammes)
 function quickSignature(text: string) {
   const base = text.toLowerCase().normalize('NFD').replace(/\p{Diacritic}+/gu,'').replace(/[^a-z\s]/g,' ').split(/\s+/).filter(Boolean).filter(t=>!['le','la','les','un','une','des','du','de','et','ou','est','sont','que','qui','dans','sur','au','aux','pour','par','avec','sans','ce','cet','cette','ces','son','sa','ses','leur','leurs','plus','moins','on','nous','vous','ils','elles'].includes(t));
@@ -271,6 +409,62 @@ async function markQuestionAsSeen(playerId: string, questionId: string): Promise
   });
 }
 
+// Récupérer les catégories sélectionnées d'une session
+function getSessionCategories(session: any): string[] | undefined {
+  try {
+    // @ts-ignore - La colonne selectedCategories peut ne pas exister
+    if (session.selectedCategories) {
+      const parsed = JSON.parse(session.selectedCategories);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch {
+    // Ignorer les erreurs de parsing
+  }
+  return undefined;
+}
+
+// Sélectionner une question en tenant compte des catégories de la session
+async function selectQuestionForSession(
+  playerId: string,
+  sessionId: string,
+  questionNumber: number,
+  selectedCategories?: string[]
+): Promise<any> {
+  const difficulty = getDifficultyForQuestion(questionNumber);
+  
+  // Pour les questions enfants (Q1-2), utiliser la fonction kids ou filtrer sur catégories kids/enfants
+  if (questionNumber <= 2) {
+    try { ensureKidsPool(450, 500).catch(() => {}); } catch {}
+    if (selectedCategories && selectedCategories.length > 0) {
+      // Filtrer sur catégories sélectionnées (en priorité kids/enfants si présentes)
+      const kidsCategories = selectedCategories.filter(c => c === 'kids' || c === 'enfants');
+      if (kidsCategories.length > 0) {
+        return await selectUnseenQuestionFiltered(playerId, 'easy', sessionId, kidsCategories);
+      }
+      // Sinon, utiliser toutes les catégories sélectionnées en facile
+      return await selectUnseenQuestionFiltered(playerId, 'easy', sessionId, selectedCategories);
+    }
+    return await selectKidFriendlyQuestion(playerId, sessionId);
+  }
+  
+  // Pour les questions moyennes (Q3-5)
+  if (questionNumber <= 5) {
+    try { ensureMediumPool(450, 500).catch(() => {}); } catch {}
+    if (selectedCategories && selectedCategories.length > 0) {
+      return await selectUnseenQuestionFiltered(playerId, 'medium', sessionId, selectedCategories);
+    }
+    return await selectUnseenQuestion(playerId, 'medium', sessionId);
+  }
+  
+  // Pour les questions difficiles (Q6-10)
+  if (selectedCategories && selectedCategories.length > 0) {
+    return await selectUnseenQuestionFiltered(playerId, 'hard', sessionId, selectedCategories);
+  }
+  return await selectHardGeneric(playerId, sessionId);
+}
+
 export async function registerQuizRoutes(app: FastifyInstance) {
   
   // GET /api/games/:gameId/quiz/status - Vérifier si le joueur peut jouer
@@ -431,13 +625,15 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: "Plus de saut disponible" });
       }
 
-      // Sélectionner une nouvelle question de même difficulté (enfant si Q<=2)
-      const diff = getDifficultyForQuestion(session.currentQuestion);
-      const nextQuestion = session.currentQuestion <= 2
-        ? await selectKidFriendlyQuestion(session.playerId, session.id)
-        : (diff === 'medium'
-            ? await selectUnseenQuestion(session.playerId, diff, session.id)
-      : await selectHardGeneric(session.playerId, session.id));
+      // Sélectionner une nouvelle question en utilisant les catégories sélectionnées
+      const selectedCategories = getSessionCategories(session);
+      const nextQuestion = await selectQuestionForSession(
+        session.playerId,
+        session.id,
+        session.currentQuestion,
+        selectedCategories
+      );
+      
       if (!nextQuestion) {
         return reply.status(500).send({ error: "Aucune autre question disponible" });
       }
@@ -693,7 +889,11 @@ export async function registerQuizRoutes(app: FastifyInstance) {
   // POST /api/games/:gameId/quiz/start - Démarrer une nouvelle session
   app.post("/api/games/:gameId/quiz/start", { preHandler: requireUserOrGuest(app) }, async (req, reply) => {
     const paramsSchema = z.object({ gameId: z.string() });
+    const bodySchema = z.object({ 
+      selectedCategories: z.array(z.string()).optional()
+    });
     const { gameId } = paramsSchema.parse((req as any).params);
+    const { selectedCategories } = bodySchema.parse((req as any).body || {});
     const user = (req as any).user;
 
     try {
@@ -740,7 +940,7 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         return reply.status(403).send({ error: "Pas assez de tokens. Attendez pour en gagner un nouveau." });
       }
 
-      // Créer une nouvelle session
+      // Créer une nouvelle session avec les catégories sélectionnées
       let session;
       try {
         session = await prisma.quizSession.create({
@@ -751,7 +951,9 @@ export async function registerQuizRoutes(app: FastifyInstance) {
             currentQuestion: 1,
             currentEarnings: 0,
             securedAmount: 0,
-          },
+            // @ts-ignore - Stocker les catégories sélectionnées (si la colonne existe)
+            selectedCategories: selectedCategories ? JSON.stringify(selectedCategories) : null,
+          } as any,
         });
       } catch (err: any) {
         // Si la création échoue, rembourser le token
@@ -759,14 +961,20 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         throw err;
       }
 
-  // Précharger pools nécessaires (kids pour Q1-2, medium générique pour Q3-5, hard IQ/logic pour 6-10 via génération standard)
-  try { ensureKidsPool(450, 500).catch(() => {}); } catch {}
-  const question = await selectKidFriendlyQuestion(player.id, session.id);
+      // Précharger pools nécessaires (kids pour Q1-2)
+      try { ensureKidsPool(450, 500).catch(() => {}); } catch {}
+      
+      // Sélectionner la première question en tenant compte des catégories
+      // Note: Pour les questions "kids" (Q1-2), on peut soit ignorer le filtre catégories,
+      // soit filtrer uniquement sur 'kids' ou 'enfants'. Ici on filtre si catégories sélectionnées.
+      const question = selectedCategories && selectedCategories.length > 0
+        ? await selectUnseenQuestionFiltered(player.id, 'easy', session.id, selectedCategories)
+        : await selectKidFriendlyQuestion(player.id, session.id);
 
       if (!question) {
         // Rembourser le token si aucune question disponible
         await refundQuizToken(player.id);
-        return reply.status(500).send({ error: "Aucune question disponible" });
+        return reply.status(500).send({ error: "Aucune question disponible dans les catégories sélectionnées" });
       }
 
       // Marquer la question comme vue
@@ -779,6 +987,7 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         securedAmount: 0,
         skipsLeft: 3,
         nextPrize: getPrizeAmount(1),
+        selectedCategories: selectedCategories || null,
         question: (() => {
           const qWithImg = attachImage(1, question);
           return {
@@ -832,22 +1041,15 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         return reply.status(404).send({ error: "Aucune session active à reprendre" });
       }
 
-  // Déterminer la difficulté à partir de la question courante (règle dynamique)
-  const difficulty = getDifficultyForQuestion(activeSession.currentQuestion);
-
-    // Sélectionner une question non vue (enfant si Q<=2)
-    if (activeSession.currentQuestion <= 2) {
-      try { ensureKidsPool(450, 500).catch(() => {}); } catch {}
-    }
-    if (activeSession.currentQuestion <= 5 && activeSession.currentQuestion > 2) {
-      try { ensureMediumPool(450, 500).catch(() => {}); } catch {}
-    }
-    // Plus de préchargement spécifique pour 'hard' (QI/Logique) — on reste générique
-    const question = activeSession.currentQuestion <= 2
-      ? await selectKidFriendlyQuestion(player.id, activeSession.id)
-      : (activeSession.currentQuestion <= 5
-          ? await selectUnseenQuestion(player.id, 'medium', activeSession.id)
-          : await selectHardGeneric(player.id, activeSession.id));
+      // Sélectionner une question en utilisant les catégories sélectionnées
+      const selectedCategories = getSessionCategories(activeSession);
+      const question = await selectQuestionForSession(
+        player.id,
+        activeSession.id,
+        activeSession.currentQuestion,
+        selectedCategories
+      );
+      
       if (!question) {
         return reply.status(500).send({ error: "Aucune question disponible pour reprise" });
       }
@@ -972,19 +1174,14 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         select: { skipsLeft: true, securedAmount: true },
       });
 
-      // Précharger les pools pertinents pour la prochaine question
-      if (nextQuestionNumber <= 2) {
-        try { ensureKidsPool(450, 500).catch(() => {}); } catch {}
-      }
-      if (nextQuestionNumber > 2 && nextQuestionNumber <= 5) {
-        try { ensureMediumPool(450, 500).catch(() => {}); } catch {}
-      }
-
-      const nextQuestion = nextQuestionNumber <= 2
-        ? await selectKidFriendlyQuestion(session.playerId, session.id)
-        : (nextQuestionNumber <= 5
-            ? await selectUnseenQuestion(session.playerId, 'medium', session.id)
-            : await selectHardGeneric(session.playerId, session.id));
+      // Sélectionner la prochaine question en utilisant les catégories sélectionnées
+      const selectedCategories = getSessionCategories(session);
+      const nextQuestion = await selectQuestionForSession(
+        session.playerId,
+        session.id,
+        nextQuestionNumber,
+        selectedCategories
+      );
 
       if (!nextQuestion) {
         return reply.status(500).send({ error: "Aucune question suivante disponible" });
@@ -1126,20 +1323,14 @@ export async function registerQuizRoutes(app: FastifyInstance) {
           },
         });
 
-  // Récupérer la prochaine question (non vue) - enfant si Q<=4
-  const nextDifficulty = getDifficultyForQuestion(session.currentQuestion + 1);
-  if ((session.currentQuestion + 1) <= 2) {
-    try { ensureKidsPool(450, 500).catch(() => {}); } catch {}
-  }
-  if ((session.currentQuestion + 1) <= 5 && (session.currentQuestion + 1) > 2) {
-    try { ensureMediumPool(450, 500).catch(() => {}); } catch {}
-  }
-  // Plus de préchargement spécifique pour 'hard' (QI/Logique) — on reste générique
-  const nextQuestion = (session.currentQuestion + 1) <= 2
-    ? await selectKidFriendlyQuestion(session.player.id, session.id)
-    : ((session.currentQuestion + 1) <= 5
-        ? await selectUnseenQuestion(session.player.id, 'medium', session.id)
-  : await selectHardGeneric(session.player.id, session.id));
+        // Récupérer la prochaine question en utilisant les catégories sélectionnées
+        const selectedCategories = getSessionCategories(session);
+        const nextQuestion = await selectQuestionForSession(
+          session.player.id,
+          session.id,
+          session.currentQuestion + 1,
+          selectedCategories
+        );
 
         if (!nextQuestion) {
           return reply.status(500).send({ error: "Erreur chargement question suivante" });
