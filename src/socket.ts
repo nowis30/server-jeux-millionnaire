@@ -22,7 +22,7 @@ export function setupSocket(server: HTTPServer) {
       credentials: true,
       origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
         // autoriser requêtes serveur-à-serveur et outils (origin nul)
-        if (!origin) return callback(null, true);
+        if (!origin || origin === "null") return callback(null, true);
         if (env.CLIENT_ORIGINS.includes(origin)) return callback(null, true);
         // autoriser tous les déploiements Vercel (prod/preview)
         if (/\.vercel\.app$/.test(origin)) return callback(null, true);

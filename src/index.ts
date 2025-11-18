@@ -111,7 +111,7 @@ async function bootstrap() {
     ],
     origin: (origin: string | undefined, cb: (err: Error | null, allow: boolean) => void) => {
       // autoriser requêtes serveur-à-serveur et outils (origin nul)
-      if (!origin) return cb(null, true);
+      if (!origin || origin === "null") return cb(null, true);
       if (env.CLIENT_ORIGINS.includes(origin)) return cb(null, true);
       // autoriser tous les déploiements Vercel en preview
       if (/\.vercel\.app$/.test(origin)) return cb(null, true);
