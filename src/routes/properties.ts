@@ -36,6 +36,15 @@ export async function registerPropertyRoutes(app: FastifyInstance) {
     return reply.send({ templates });
   });
 
+  // Récupérer un template spécifique par ID
+  app.get("/api/properties/templates/:id", async (req, reply) => {
+    const paramsSchema = z.object({ id: z.string() });
+    const { id } = paramsSchema.parse((req as any).params);
+    const template = await app.prisma.propertyTemplate.findUnique({ where: { id } });
+    if (!template) return reply.status(404).send({ error: "Template non trouvé" });
+    return reply.send({ template });
+  });
+
   // Remplir/compléter la banque d'immeubles manuellement (bouton client)
   // - Garantit au moins 5 par type (Maison/Duplex/Triplex/6-plex/Tour)
   // - Et un total minimal de 50 templates au global
