@@ -1499,6 +1499,67 @@ export async function registerQuizRoutes(app: FastifyInstance) {
     }
   });
 
+  // POST /api/quiz/topup-categories - Assurer >= minCount questions par catégorie (toutes difficultés confondues)
+  app.post('/api/quiz/topup-categories', { preHandler: requireAdmin(app) }, async (req, reply) => {
+    const bodySchema = z.object({ minCount: z.number().int().min(5).max(200).default(20), perCategory: z.boolean().optional().default(true) });
+    const { minCount } = bodySchema.parse((req as any).body || {});
+    try {
+      // Récupérer liste des catégories autorisées depuis aiQuestions
+      const { allowedCategories, generateQuestionsWithAI } = require('../services/aiQuestions');
+      const results: Array<{ category: string; before: number; created: number; after: number }> = [];
+      for (const cat of allowedCategories) {
+        // Compter total existant (toutes difficultés)
+        const before = await prisma.quizQuestion.count({ where: { category: cat } });
+        if (before >= minCount) {
+          results.push({ category: cat, before, created: 0, after: before });
+          continue;
+        }
+        const needed = minCount - before;
+        let created = 0;
+        // Répartition simple: approx 40% easy, 35% medium, 25% hard
+        const plan: Array<{ diff: 'easy'|'medium'|'hard'; count: number }> = [
+          { diff: 'easy', count: Math.max(1, Math.round(needed * 0.4)) },
+          { diff: 'medium', count: Math.max(1, Math.round(needed * 0.35)) },
+          { diff: 'hard', count: Math.max(1, needed - Math.round(needed * 0.4) - Math.round(needed * 0.35)) },
+        ];
+        for (const step of plan) {
+          if (created >= needed) break;
+          const batch = await generateQuestionsWithAI(step.diff, cat, step.count);
+          for (const q of batch) {
+            if (created >= needed) break;
+            try {
+              // Vérifier duplication basique (question exacte)
+              const exists = await prisma.quizQuestion.findFirst({ where: { question: q.question } });
+              if (exists) continue;
+              await prisma.quizQuestion.create({
+                data: {
+                  question: q.question,
+                  optionA: q.optionA,
+                  optionB: q.optionB,
+                  optionC: q.optionC,
+                  optionD: q.optionD,
+                  correctAnswer: q.correctAnswer,
+                  difficulty: q.difficulty,
+                  category: cat,
+                  imageUrl: null,
+                }
+              });
+              created++;
+            } catch {}
+          }
+          // petite pause anti rate-limit
+          await new Promise(r => setTimeout(r, 400));
+        }
+        const after = await prisma.quizQuestion.count({ where: { category: cat } });
+        results.push({ category: cat, before, created, after });
+      }
+      return reply.send({ success: true, minCount, categories: results });
+    } catch (err: any) {
+      app.log.error({ err }, 'Erreur topup-categories');
+      return reply.status(500).send({ error: err.message });
+    }
+  });
+
   // GET /api/quiz/public-stats - Statistiques publiques (sans auth)
   app.get("/api/quiz/public-stats", async (req, reply) => {
     try {
