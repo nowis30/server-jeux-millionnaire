@@ -33,6 +33,7 @@ export async function registerDragRoutes(app: FastifyInstance) {
 
       const player = await resolvePlayerForRequest(app, req, gameId);
       if (!player) return reply.status(404).send({ error: "Player not found" });
+      app.log.info({ route: 'drag/session', playerId: player.id, gameId }, 'Drag session request');
 
       // Lire progression (via Prisma any pour compat compatibilité si client non régénéré)
       const p = await (prisma as any).player.findUnique({
@@ -88,6 +89,7 @@ export async function registerDragRoutes(app: FastifyInstance) {
 
     const player = await resolvePlayerForRequest(app, req, gameId);
     if (!player) return reply.status(404).send({ error: "Player not found" });
+    app.log.info({ route: 'drag/result:init', playerId: player.id, gameId, stage: body.stage, elapsedMs: body.elapsedMs, win: body.win }, 'Drag result incoming');
 
     // Récupérer progression + timestamps anti‑abus
     const full = await (prisma as any).player.findUnique({
@@ -111,6 +113,7 @@ export async function registerDragRoutes(app: FastifyInstance) {
     // Temps plausible par étape
     const minTime = minPlausibleTimeMs(body.stage);
     if (body.elapsedMs < minTime) {
+      app.log.warn({ route: 'drag/result', playerId: player.id, gameId, stage: body.stage, elapsedMs: body.elapsedMs, minTime }, 'Elapsed below plausible minimum');
       return reply.status(400).send({ error: "Temps de course improbable" });
     }
 
@@ -157,6 +160,7 @@ export async function registerDragRoutes(app: FastifyInstance) {
       return { run, updated };
     });
 
+    app.log.info({ route: 'drag/result:success', playerId: player.id, gameId, grantedReward: granted, stage: body.stage, newStage: result.updated.dragStage }, 'Drag result processed');
     return reply.send({
       ok: true,
       grantedReward: granted,
