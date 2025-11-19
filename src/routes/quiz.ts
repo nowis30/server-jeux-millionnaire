@@ -941,6 +941,17 @@ export async function registerQuizRoutes(app: FastifyInstance) {
 
       // Créer une nouvelle session et persister les catégories sélectionnées (schéma supporte selectedCategories)
       let session;
+      
+      // Validation des catégories sélectionnées (min 20 questions)
+      if (selectedCategories && selectedCategories.length > 0) {
+        for (const cat of selectedCategories) {
+          const count = await prisma.quizQuestion.count({ where: { category: cat } });
+          if (count < 20) {
+            return reply.status(400).send({ error: `La catégorie '${cat}' n'a pas assez de questions (${count}/20 minimum).` });
+          }
+        }
+      }
+
       try {
         session = await prisma.quizSession.create({
           data: {
