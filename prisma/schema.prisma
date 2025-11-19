@@ -309,6 +309,8 @@ model QuizSession {
   // Recharges publicitaires pour récupérer des sauts
   adSkipRechargeCount Int @default(0)
   lastAdSkipAt DateTime?
+  // Catégories sélectionnées pour cette session (JSON stringifié)
+  selectedCategories String?
   
   attempts        QuizAttempt[]
   

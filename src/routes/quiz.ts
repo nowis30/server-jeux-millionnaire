@@ -412,7 +412,6 @@ async function markQuestionAsSeen(playerId: string, questionId: string): Promise
 // Récupérer les catégories sélectionnées d'une session
 function getSessionCategories(session: any): string[] | undefined {
   try {
-    // @ts-ignore - La colonne selectedCategories peut ne pas exister
     if (session.selectedCategories) {
       const parsed = JSON.parse(session.selectedCategories);
       if (Array.isArray(parsed) && parsed.length > 0) {
@@ -940,7 +939,7 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         return reply.status(403).send({ error: "Pas assez de tokens. Attendez pour en gagner un nouveau." });
       }
 
-      // Créer une nouvelle session avec les catégories sélectionnées
+      // Créer une nouvelle session et persister les catégories sélectionnées (schéma supporte selectedCategories)
       let session;
       try {
         session = await prisma.quizSession.create({
@@ -951,9 +950,9 @@ export async function registerQuizRoutes(app: FastifyInstance) {
             currentQuestion: 1,
             currentEarnings: 0,
             securedAmount: 0,
-            // @ts-ignore - Stocker les catégories sélectionnées (si la colonne existe)
-            selectedCategories: selectedCategories ? JSON.stringify(selectedCategories) : null,
-          } as any,
+            skipsLeft: 3,
+            selectedCategories: selectedCategories && selectedCategories.length > 0 ? JSON.stringify(selectedCategories) : null,
+          },
         });
       } catch (err: any) {
         // Si la création échoue, rembourser le token
@@ -987,7 +986,7 @@ export async function registerQuizRoutes(app: FastifyInstance) {
         securedAmount: 0,
         skipsLeft: 3,
         nextPrize: getPrizeAmount(1),
-        selectedCategories: selectedCategories || null,
+        selectedCategories: selectedCategories && selectedCategories.length > 0 ? selectedCategories : null,
         question: (() => {
           const qWithImg = attachImage(1, question);
           return {
@@ -1003,8 +1002,8 @@ export async function registerQuizRoutes(app: FastifyInstance) {
       });
 
     } catch (err: any) {
-      app.log.error({ err }, "Erreur start quiz");
-      return reply.status(500).send({ error: err.message });
+      app.log.error({ err, route: 'quiz/start' }, "Erreur start quiz");
+      return reply.status(500).send({ error: err.message || "Erreur interne démarrage quiz" });
     }
   });
 
@@ -1791,6 +1790,34 @@ export async function registerQuizRoutes(app: FastifyInstance) {
       });
     } catch (err: any) {
       app.log.error({ err }, "Erreur grant-tokens");
+      return reply.status(500).send({ error: err.message });
+    }
+  });
+
+  // Export toutes les questions (pour sync entre serveurs)
+  app.get('/api/quiz/export-questions', async (req, reply) => {
+    try {
+      const questions = await prisma.quizQuestion.findMany({
+        select: {
+          question: true,
+          optionA: true,
+          optionB: true,
+          optionC: true,
+          optionD: true,
+          correctAnswer: true,
+          difficulty: true,
+          category: true,
+          imageUrl: true,
+        },
+      });
+
+      return reply.send({
+        success: true,
+        count: questions.length,
+        questions,
+      });
+    } catch (err: any) {
+      app.log.error({ err }, "Erreur export-questions");
       return reply.status(500).send({ error: err.message });
     }
   });
