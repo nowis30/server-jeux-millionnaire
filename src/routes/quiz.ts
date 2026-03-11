@@ -771,13 +771,15 @@ export async function registerQuizRoutes(app: FastifyInstance) {
 
       if (currentSkips > 0) {
         // AUTO-SKIP: décrémenter le skip, marquer la question, et fournir une nouvelle question même difficulté
-        // Sélectionner la prochaine question (même logique que /skip)
-        const diff = getDifficultyForQuestion(session.currentQuestion);
-        const nextQuestion = session.currentQuestion <= 2
-          ? await selectKidFriendlyQuestion(session.playerId, session.id)
-          : (diff === 'medium'
-              ? await selectUnseenQuestion(session.playerId, diff, session.id)
-              : await selectHardGeneric(session.playerId, session.id));
+        // Sélectionner la prochaine question avec la même logique que /skip,
+        // y compris les catégories choisies par le joueur.
+        const selectedCategories = getSessionCategories(session);
+        const nextQuestion = await selectQuestionForSession(
+          session.playerId,
+          session.id,
+          session.currentQuestion,
+          selectedCategories
+        );
         if (!nextQuestion) {
           return reply.status(500).send({ error: "Aucune autre question disponible" });
         }
