@@ -3,7 +3,7 @@ import type { FastifyRequest, FastifyReply, FastifyError } from "fastify";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import cookie from "@fastify/cookie";
-import { env } from "./env";
+import { env, isAllowedOrigin } from "./env";
 import { registerGameRoutes } from "./routes/games";
 import { setupSocket } from "./socket";
 import cron from "node-cron";
@@ -34,17 +34,37 @@ import { registerDragRoutes } from "./routes/drag";
 import { generateAndSaveQuestions, replenishIfLow, maintainQuestionStock, ensureKidsPool, ensureMediumPool } from "./services/aiQuestions";
 import { ensurePropertyTypeQuotas } from "./services/seeder";
 
+const cookieBaseOptions = {
+  path: "/",
+  secure: env.COOKIE_SECURE,
+  sameSite: env.COOKIE_SAME_SITE,
+} as const;
+
+const httpOnlyCookieOptions = {
+  ...cookieBaseOptions,
+  httpOnly: true,
+  ...(env.COOKIE_DOMAIN ? { domain: env.COOKIE_DOMAIN } : {}),
+};
+
+const readableCookieOptions = {
+  ...cookieBaseOptions,
+  httpOnly: false,
+  ...(env.COOKIE_DOMAIN ? { domain: env.COOKIE_DOMAIN } : {}),
+};
+
 async function bootstrap() {
-  // Exécuter les migrations Prisma au démarrage (idempotent). Utile sur Render sans shell.
-  try {
-    console.log("[boot] Running prisma migrate deploy...");
-    execSync("npx prisma migrate deploy", {
-      stdio: "inherit",
-      cwd: path.resolve(__dirname, ".."),
-    });
-    console.log("[boot] Prisma migrate deploy done.");
-  } catch (e) {
-    console.error("[boot] Prisma migrate deploy failed", e);
+  // Exécuter les migrations au démarrage uniquement si explicitement demandé.
+  if (env.MIGRATE_ON_BOOT) {
+    try {
+      console.log("[boot] Running prisma migrate deploy...");
+      execSync("npx prisma migrate deploy", {
+        stdio: "inherit",
+        cwd: path.resolve(__dirname, ".."),
+      });
+      console.log("[boot] Prisma migrate deploy done.");
+    } catch (e) {
+      console.error("[boot] Prisma migrate deploy failed", e);
+    }
   }
   // Vérification schéma: si certaines tables n'existent pas (ex: MarketTick) et pas de shell Render,
   // pousser le schéma automatiquement en fallback.
@@ -89,7 +109,25 @@ async function bootstrap() {
       console.error("[boot] Seed failed", e);
     }
   }
-  const app = Fastify({ logger: true });
+  const app = Fastify({
+    trustProxy: true,
+    logger: {
+      level: env.LOG_LEVEL,
+      redact: {
+        paths: [
+          "req.headers.authorization",
+          "req.headers.cookie",
+          "req.headers.x-csrf-token",
+          "req.headers.x-xsrf-token",
+          "res.headers.set-cookie",
+          "password",
+          "body.password",
+          "body.token",
+        ],
+        remove: true,
+      },
+    },
+  });
   // CORS: accepter une liste d'origines
   await app.register(cors, {
     credentials: true,
@@ -110,19 +148,7 @@ async function bootstrap() {
       "Set-Cookie",
     ],
     origin: (origin: string | undefined, cb: (err: Error | null, allow: boolean) => void) => {
-      // autoriser requêtes serveur-à-serveur et outils (origin nul)
-      if (!origin || origin === "null") return cb(null, true);
-      if (env.CLIENT_ORIGINS.includes(origin)) return cb(null, true);
-      // autoriser tous les déploiements Vercel en preview
-      if (/\.vercel\.app$/.test(origin)) return cb(null, true);
-      // autoriser GitHub Pages (ex: https://nowis30.github.io)
-      if (origin === "https://nowis30.github.io" || origin.endsWith(".github.io")) return cb(null, true);
-      // autoriser localhost en dev (http et https, avec/sans port)
-      if (origin.startsWith("http://localhost:")) return cb(null, true);
-      if (origin.startsWith("https://localhost:")) return cb(null, true);
-      if (origin === "http://localhost" || origin === "https://localhost") return cb(null, true);
-      // autoriser Capacitor (app mobile)
-      if (origin === "capacitor://localhost") return cb(null, true);
+      if (isAllowedOrigin(origin)) return cb(null, true);
       // Log refus pour diagnostic en production (CORS)
       app.log.warn({ origin, allowed: env.CLIENT_ORIGINS }, "CORS origin refusé");
       cb(new Error("Origin not allowed"), false);
@@ -135,6 +161,17 @@ async function bootstrap() {
 
   app.decorate("prisma", prisma);
 
+  app.addHook("onSend", async (_request: FastifyRequest, reply: FastifyReply) => {
+    reply.header("Vary", "Origin");
+    reply.header("X-Content-Type-Options", "nosniff");
+    reply.header("X-Frame-Options", "SAMEORIGIN");
+    reply.header("Referrer-Policy", "strict-origin-when-cross-origin");
+    reply.header("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+    if (env.NODE_ENV === "production") {
+      reply.header("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload");
+    }
+  });
+
   // Auth invité par cookie: attribuer un UUID si absent
   app.addHook("onRequest", async (request: FastifyRequest, reply: FastifyReply) => {
     const COOKIE_NAME = "hm_guest";
@@ -144,10 +181,7 @@ async function bootstrap() {
       const { nanoid } = await import("nanoid");
       const id = nanoid();
       reply.setCookie(COOKIE_NAME, id, {
-        path: "/",
-        httpOnly: true,
-        sameSite: "none",
-        secure: true,
+        ...httpOnlyCookieOptions,
         maxAge: 60 * 60 * 24 * 365, // 1 an
       });
     }
@@ -160,10 +194,7 @@ async function bootstrap() {
       const token = nanoid();
       // Non httpOnly pour lecture par le client
       reply.setCookie(CSRF_COOKIE, token, {
-        path: "/",
-        httpOnly: false,
-        sameSite: "none",
-        secure: true,
+        ...readableCookieOptions,
       });
     }
   });
@@ -213,15 +244,7 @@ async function bootstrap() {
       }
       
       // Tolérance: origine autorisée sans CSRF strict
-      const allowed =
-        !origin ||
-        env.CLIENT_ORIGINS.includes(origin) ||
-        /\.vercel\.app$/.test(origin) ||
-        origin.startsWith("http://localhost:") ||
-        origin.startsWith("https://localhost:") ||
-        origin === "http://localhost" ||
-        origin === "https://localhost" ||
-        origin === "capacitor://localhost";
+      const allowed = isAllowedOrigin(origin);
       
       if (allowed) {
         req.log.info({ url, method, origin }, "CSRF check passed (allowed origin)");
@@ -552,6 +575,14 @@ declare module "fastify" {
 bootstrap().catch((err) => {
   console.error(err);
   process.exit(1);
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[process] unhandledRejection", reason);
+});
+
+process.on("uncaughtException", (error) => {
+  console.error("[process] uncaughtException", error);
 });
 
 // Assure l'existence d'une partie unique globale au démarrage

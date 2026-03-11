@@ -4,28 +4,34 @@ import { listListings, createListing, cancelListing, acceptListing } from "../se
 import { assertGameRunning } from "./util";
 
 export async function registerListingRoutes(app: FastifyInstance) {
+  const paramsSchema = z.object({ gameId: z.string() });
+  const createBodySchema = z.object({
+    sellerId: z.string(),
+    holdingId: z.string().optional(),
+    templateId: z.string().optional(),
+    price: z.number().positive(),
+    type: z.string().optional(),
+  }).refine((b) => b.holdingId || b.templateId, { message: "holdingId ou templateId requis" });
+
   app.get("/api/games/:gameId/listings", async (req, reply) => {
-    const paramsSchema = z.object({ gameId: z.string() });
     const { gameId } = paramsSchema.parse((req as any).params);
     const listings = await listListings(gameId);
     return reply.send({ listings });
   });
 
   app.post("/api/games/:gameId/listings", async (req, reply) => {
-    const paramsSchema = z.object({ gameId: z.string() });
-    const bodySchema = z.object({
-      sellerId: z.string(),
-      holdingId: z.string().optional(),
-      templateId: z.string().optional(),
-      price: z.number().positive(),
-      type: z.string().optional(),
-    }).refine((b) => b.holdingId || b.templateId, { message: "holdingId ou templateId requis" });
-
     try {
       const { gameId } = paramsSchema.parse((req as any).params);
-  const body = bodySchema.parse((req as any).body);
-  await assertGameRunning(app, gameId);
-      const listing = await createListing({ gameId, ...body });
+      const body = createBodySchema.parse((req as any).body);
+      await assertGameRunning(app, gameId);
+      const listing = await createListing({
+        gameId,
+        sellerId: body.sellerId,
+        price: body.price,
+        holdingId: body.holdingId,
+        templateId: body.templateId,
+        type: body.type,
+      });
       (app as any).io?.to(`game:${gameId}`).emit("event-feed", {
         type: "listing:create",
         at: new Date().toISOString(),
