@@ -52,6 +52,26 @@ const readableCookieOptions = {
   ...(env.COOKIE_DOMAIN ? { domain: env.COOKIE_DOMAIN } : {}),
 };
 
+async function ensureSchemaAccess(check: () => Promise<unknown>, label: string) {
+  try {
+    await check();
+    return true;
+  } catch (e) {
+    try {
+      console.warn(`[boot] ${label} missing/inaccessible — running 'prisma db push' fallback...`);
+      execSync("npx prisma db push", {
+        stdio: "inherit",
+        cwd: path.resolve(__dirname, ".."),
+      });
+      console.log(`[boot] Prisma db push completed (${label}).`);
+      return true;
+    } catch (e2) {
+      console.error(`[boot] Prisma db push failed (${label})`, e2);
+      return false;
+    }
+  }
+}
+
 async function bootstrap() {
   // Exécuter les migrations au démarrage uniquement si explicitement demandé.
   if (env.MIGRATE_ON_BOOT) {
@@ -66,37 +86,13 @@ async function bootstrap() {
       console.error("[boot] Prisma migrate deploy failed", e);
     }
   }
-  // Vérification schéma: si certaines tables n'existent pas (ex: MarketTick) et pas de shell Render,
-  // pousser le schéma automatiquement en fallback.
-  try {
-    await prisma.marketTick.count();
-  } catch (e) {
-    try {
-      console.warn("[boot] Prisma schema incomplete — running 'prisma db push' fallback...");
-      execSync("npx prisma db push", {
-        stdio: "inherit",
-        cwd: path.resolve(__dirname, ".."),
-      });
-      console.log("[boot] Prisma db push completed.");
-    } catch (e2) {
-      console.error("[boot] Prisma db push failed", e2);
-    }
-  }
-  // Nouveau: tenter aussi un accès à DragRun pour déclencher db push si nécessaire
-  try {
-    await (prisma as any).dragRun.count();
-  } catch (e) {
-    try {
-      console.warn("[boot] DragRun missing — running 'prisma db push' fallback...");
-      execSync("npx prisma db push", {
-        stdio: "inherit",
-        cwd: path.resolve(__dirname, ".."),
-      });
-      console.log("[boot] Prisma db push completed (DragRun).");
-    } catch (e2) {
-      console.error("[boot] Prisma db push failed (DragRun)", e2);
-    }
-  }
+  // Vérification schéma: si certaines tables critiques n'existent pas encore en production,
+  // pousser le schéma automatiquement en fallback pour éviter les 500 sur login/auth ou mini-jeux.
+  await ensureSchemaAccess(() => prisma.marketTick.count(), "MarketTick");
+  await ensureSchemaAccess(() => (prisma as any).dragRun.count(), "DragRun");
+  await ensureSchemaAccess(() => prisma.user.count(), "User");
+  await ensureSchemaAccess(() => (prisma as any).emailVerificationToken.count(), "EmailVerificationToken");
+  await ensureSchemaAccess(() => (prisma as any).passwordResetToken.count(), "PasswordResetToken");
   if (env.SEED_ON_BOOT) {
     try {
       console.log("[boot] Running seed script prisma/seed.js...");
