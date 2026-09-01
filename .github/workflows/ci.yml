@@ -1,61 +1,28 @@
-name: CI
+name: Supabase CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 jobs:
-  build-and-test:
+  edge-function:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:15
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: heritier
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres" 
-          --health-interval 10s 
-          --health-timeout 5s 
-          --health-retries 5
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Use Node.js 20
-        uses: actions/setup-node@v4
+      - name: Install Deno
+        uses: denoland/setup-deno@v2
         with:
-          node-version: 20
-          cache: 'npm'
+          deno-version: v2.x
+      - name: Type check
+        run: deno check supabase/functions/heritier-api/index.ts
 
-      - name: Install deps
-        run: npm ci
-
-      - name: Prisma generate
-        env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/heritier
-        run: npx prisma generate
-
-      - name: Prisma db push (sync schema for tests)
-        env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/heritier
-        run: npx prisma db push
-
-      - name: Build
-        run: npm run build
-
-      - name: Run smoke and route tests (including drag)
-        env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/heritier
-        run: |
-          npm run test:smoke
-          npm run test:smoke:market
-          npm run test:smoke:portfolio
-          npm run test:routes:portfolio
-          npm run test:routes:drag
+  migrations:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Ensure migrations are versioned
+        run: test -n "$(find supabase/migrations -maxdepth 1 -name '*.sql' -print -quit)"

@@ -1,140 +1,69 @@
-# Déploiement Production – Héritier Millionnaire
+# Déploiement Supabase — Héritier Millionnaire
 
-Ce document rassemble les réglages indispensables pour déployer le serveur Fastify + Prisma et le client Next.js (Vercel) en production avec cookies cross‑site, CORS, cron et sécurité basique.
+## Pré-requis
 
-## 1. Variables d'environnement principales (server/.env)
+- accès au projet Supabase `smwrpejnegtssmtmnecb` ;
+- CLI Supabase récente ;
+- dépôt client Vercel configuré avec les variables publiques décrites plus bas.
 
-| Nom | Rôle | Exemple |
-|-----|------|---------|
-| PORT | Port HTTP d'écoute | 3001 |
-| DATABASE_URL | Connexion PostgreSQL / MySQL / etc. | postgres://user:pass@host:5432/db |
-| JWT_SECRET | Secret pour signer les tokens | (générer aléatoire 64+ chars) |
-| ADMIN_EMAIL | Email auto-promu admin à l'inscription | admin@exemple.com |
-| ADMIN_VERIFY_SECRET | Secret pour endpoints admin (promote/reset/seed) | (générer fort) |
-| CLIENT_ORIGIN | Liste des origines front autorisées (séparées par virgules) | https://app-prod.vercel.app,https://app-preview-xyz.vercel.app |
-| APP_ORIGIN | Origine principale du client (utilisée pour liens email) | https://app-prod.vercel.app |
-| GLOBAL_GAME_CODE | Code partie globale unique | GLOBAL |
-| CRON_TICK | Expression cron (tick hebdo de jeu) | 0 * * * * |
-| MARKET_TICK_CRON | Expression cron marché | 0 */12 * * * * |
-| TIMEZONE | Fuseau horaire pour cron | America/Toronto |
-| SKIP_EMAIL_VERIFICATION | true pour bypass email vérif | false |
-| SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASS / MAIL_FROM | Envoi d'emails reset / vérif | (selon fournisseur) |
-| SEED_ON_BOOT | Générer seed au démarrage (debug) | false |
+## 1. Vérifier les sources
 
-### Génération de secrets (PowerShell)
-```powershell
-# 64 caractères aléatoires
-( -join ((65..90)+(97..122)+(48..57) | Get-Random -Count 64 | ForEach-Object {[char]$_}) )
+```bash
+deno check supabase/functions/heritier-api/index.ts
 ```
 
-## 2. Cookies cross-site
+## 2. Appliquer les migrations
 
-Le serveur définit `hm_auth`, `hm_csrf`, `hm_guest` avec `SameSite=None; Secure`. Conditions:
-- Le domaine doit être servi en HTTPS (obligatoire pour SameSite=None).
-- En environnement local, utiliser navigateur récent; Safari iOS peut bloquer cookies tiers quand API et front sont sur domaines différents.
-- Fallback prévu: header `Authorization: Bearer` (token stocké localStorage `HM_TOKEN`).
-
-## 3. CORS
-
-Logiciel: `@fastify/cors` + Socket.IO.
-- Origines autorisées: chaque entrée dans `CLIENT_ORIGIN` + tous les domaines `*.vercel.app` (préviews) + localhost.
-- Pour une origine non autorisée, un log `CORS origin refusé` apparaît.
-
-Checklist:
-- Vérifier que le domaine final (ex: https://app-prod.vercel.app) figure dans `CLIENT_ORIGIN`.
-- Ajouter explicitement les sous-domaines preview si vous souhaitez limiter (sinon wildcard vercel déjà accepté).
-
-## 4. Prisma & Base de données
-
-Au démarrage:
-- `prisma migrate deploy` (tente d’appliquer migrations).
-- Fallback `prisma db push` si certaines tables manquent.
-
-Recommandations:
-- Utiliser migrations versionnées (éviter db push en prod sauf première initialisation).
-- Avoir une connexion persistante (Render/Fly: plan avec stockage durable).
-
-## 5. Cron / Simulation
-
-| Tâche | Fréquence | Description |
-|-------|-----------|-------------|
-| hourlyTick | `CRON_TICK` (par défaut 0 * * * *) | 1 semaine de jeu par heure réelle |
-| market daily tick | `MARKET_TICK_CRON` | Avance marché (≈ 5 jours boursiers / heure) |
-| Quotas immobiliers | chaque heure + toutes les 5 min | Maintient min 5 par type, total ≥50 |
-| Nettoyage ticks marché | toutes les 20 min | Conserve historique allégé |
-| Tokens quiz | chaque minute | Distribution automatique |
-| Ajustement taux hypothécaire | mensuel | Variation ±0,25% dans [2%,7%] |
-| Appréciation annuelle | annuel | Sélection 2–5% |
-
-## 6. Endpoints sensibles
-
-| Endpoint | Protection | Objet |
-|----------|-----------|-------|
-| POST /api/games/:id/advance-weeks | Admin (JWT isAdmin) | Avance temporelle forcée |
-| POST /api/auth/admin/promote | Secret + email | Promotion utilisateur admin |
-| POST /api/admin/reset-games | Secret | Reset complet (danger) |
-| GET/POST /api/properties/refill/sixplex10 | Public (à sécuriser si nécessaire) | Assurer 10 six‑plex |
-| GET/POST /api/properties/refill/tower50x10 | Public | Assurer 10 tours 50 log |
-
-Si vous désirez restreindre les endpoints de refill: ajouter un middleware admin ou un secret (modification rapide possible).
-
-## 7. Flux d’authentification
-
-1. Login/Registration → renvoie JSON `{ token }` + écrit cookie httpOnly `hm_auth` (12h) et cookie CSRF.
-2. Client stocke `HM_TOKEN` dans localStorage et envoie `Authorization: Bearer` sur chaque requête.
-3. Si 401 à cause d’expiration proche, client déclenche `/api/auth/refresh` et rejoue la requête.
-
-## 8. CSRF
-
-Pour POST/PUT/PATCH/DELETE:
-- Client récupère `/api/auth/csrf` pour charger cookie + valeur JSON.
-- Envoie entête `x-csrf-token`.
-- Tolérances: autorisé si origine approuvée + cookie session présent (compat Safari).
-
-## 9. Sécurité additionnelle recommandée
-
-- Régénérer `JWT_SECRET` avant chaque mise en prod, ne jamais le commiter.
-- Activer un monitoring basique (logs d’erreurs Fastify déjà présents).
-- Mettre en place un WAF / rate-limit plus strict si trafic public important (actuellement `@fastify/rate-limit` 100 req/min).
-- Sauvegardes régulières de la base (dump quotidien + restauration testée).
-
-## 10. Exemple de fichier server/.env
-
-```
-PORT=3001
-DATABASE_URL=postgres://user:pass@host:5432/heritier
-JWT_SECRET=CHANGER_CE_SECRET_ULTRA_LONG
-ADMIN_EMAIL=admin@exemple.com
-ADMIN_VERIFY_SECRET=SECRET_ADMIN_FORT
-CLIENT_ORIGIN=https://app-prod.vercel.app,https://app-preview-abc.vercel.app
-APP_ORIGIN=https://app-prod.vercel.app
-GLOBAL_GAME_CODE=GLOBAL
-CRON_TICK=0 * * * *
-MARKET_TICK_CRON=0 */12 * * * *
-TIMEZONE=America/Toronto
-SKIP_EMAIL_VERIFICATION=false
-SMTP_HOST=smtp.exemple.com
-SMTP_PORT=587
-SMTP_SECURE=false
-SMTP_USER=no-reply@exemple.com
-SMTP_PASS=motdepasseSMTP
-MAIL_FROM="Héritier Millionnaire <no-reply@exemple.com>"
+```bash
+supabase link --project-ref smwrpejnegtssmtmnecb
+supabase db push
 ```
 
-## 11. Vérifications post-déploiement
+Les migrations créent le schéma privé `heritier`, les données initiales et les
+tâches suivantes :
 
-1. Appeler `/api/health` (si présent) ou `/api/games` → retour partie GLOBAL.
-2. Appeler `/api/auth/csrf` depuis le front → vérifier réception cookie `hm_csrf`.
-3. Login → vérifier cookie `hm_auth` + stockage `HM_TOKEN`.
-4. Achat immobilier → confirmer events + auto maintain-bank.
-5. Refill six‑plex / tours 50 → vérifier templates supplémentaires.
+| Tâche | Fréquence | Rôle |
+|---|---:|---|
+| `heritier-market-tick` | 12 minutes | Cours des actifs |
+| `heritier-hourly-tick` | chaque heure | Simulation immobilière et dividendes |
+| distribution de jetons | 1 minute | Recharge Quiz et Pari |
+| nettoyage d’exécution | 10 minutes | Présence et historique transitoire |
 
-## 12. Évolutions futures
+## 3. Déployer l’Edge Function
 
-- Boutons refill incrémental (+10 au lieu de cible fixe) : ajouter endpoints calculant `target = current + delta`.
-- Refill tours 100 log: endpoint analogue (`units=100`, min 5).
-- Limiter refill aux admins: wrap endpoints avec `requireAdmin`.
-- Ajout métriques Prometheus (latence, taux erreurs) et alerte sur échec cron.
+```bash
+supabase functions deploy heritier-api --no-verify-jwt
+```
 
----
-Dernière mise à jour: 2025-11-08
+`verify_jwt` reste désactivé au niveau de la passerelle parce que `/health` et
+quelques catalogues sont publics. Toutes les routes protégées valident néanmoins
+le jeton via Supabase Auth dans `authenticate()`.
+
+## 4. Configurer le client Vercel
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=https://smwrpejnegtssmtmnecb.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_3-7XDsd5zEd-3rrqr0-xgQ_kk0z3ArR
+```
+
+Le client est un export statique Next.js. Il ne doit contenir ni réécriture
+`/api` vers Render, ni URL `onrender.com`, ni clé `service_role`.
+
+## 5. Vérifications de production
+
+1. `/health` répond avec `ok: true` et `backend: supabase`.
+2. Un compte confirmé peut se connecter et rejoindre la partie `GLOBAL`.
+3. L’accueil, l’immobilier, la bourse, le Quiz et le Drag chargent leurs données.
+4. Une action d’écriture persiste après rechargement.
+5. Les quatre tâches planifiées sont actives dans `cron.job`.
+6. Les conseillers Supabase ne signalent aucune alerte de sécurité sur le schéma
+   `heritier`.
+
+## Retour arrière
+
+- Edge Function : redéployer une version Git antérieure.
+- Base : préférer une migration corrective ; ne pas modifier manuellement une
+  migration déjà appliquée.
+- Ancienne base Render : la garder suspendue comme archive tant que la migration
+  historique n’a pas été formellement clôturée. Elle n’est pas utilisée par la
+  production.
