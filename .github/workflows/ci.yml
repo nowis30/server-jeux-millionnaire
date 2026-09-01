@@ -17,7 +17,7 @@ jobs:
         with:
           deno-version: v2.x
       - name: Type check
-        run: deno check supabase/functions/heritier-api/index.ts
+        run: deno check --config=supabase/functions/heritier-api/deno.json supabase/functions/heritier-api/index.ts
 
   migrations:
     runs-on: ubuntu-latest
