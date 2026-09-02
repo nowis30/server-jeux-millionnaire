@@ -1,4 +1,5 @@
 import postgres from "npm:postgres@3.4.7";
+import { generateVerifiedQuizBatch } from "./quiz-ai.ts";
 
 const DB_URL = Deno.env.get("SUPABASE_DB_URL");
 if (!DB_URL) throw new Error("SUPABASE_DB_URL is required");
@@ -246,35 +247,92 @@ export async function touchPresence(user: AuthUser, gameId: string, player: any,
   `;
 }
 
+async function unseenQuestion(db: any, playerId: string, difficulty: string, categories: string[]): Promise<any | null> {
+  const rows = categories.length
+    ? await db`
+        select q.* from heritier.quiz_questions q
+        where q.active and q.difficulty=${difficulty}
+          and q.category = any(${categories}::text[])
+          and not exists (
+            select 1 from heritier.quiz_question_seen seen
+            where seen.player_id=${playerId}::uuid and seen.question_id=q.id
+          )
+        order by random() limit 1
+      `
+    : await db`
+        select q.* from heritier.quiz_questions q
+        where q.active and q.difficulty=${difficulty}
+          and not exists (
+            select 1 from heritier.quiz_question_seen seen
+            where seen.player_id=${playerId}::uuid and seen.question_id=q.id
+          )
+        order by random() limit 1
+      `;
+  return rows[0] ?? null;
+}
+
+/**
+ * Choisit toujours une question inédite pour le joueur tant qu'il en existe une.
+ * Si la catégorie choisie est épuisée, Luna tente de créer et vérifier un nouveau lot.
+ * On n'autorise une répétition qu'en dernier recours absolu, triée par la plus ancienne vue.
+ */
 export async function selectQuizQuestion(db: any, playerId: string, questionNumber: number, categories: string[] = []): Promise<any> {
   const difficulty = questionNumber <= 2 ? "easy" : questionNumber <= 5 ? "medium" : "hard";
   const normalizedCategories = categories.filter((value) => /^[a-z0-9-]{2,40}$/i.test(value)).slice(0, 20);
-  let rows: any[];
+
+  let selected = await unseenQuestion(db, playerId, difficulty, normalizedCategories);
+  if (selected) return selected;
+
   if (normalizedCategories.length) {
-    rows = await db`
-      select q.* from heritier.quiz_questions q
-      where q.active and q.difficulty = ${difficulty}
-        and q.category = any(${normalizedCategories}::text[])
-        and not exists (
-          select 1 from heritier.quiz_question_seen seen
-          where seen.player_id = ${playerId}::uuid and seen.question_id = q.id
-        )
-      order by random() limit 1
-    `;
-  } else {
-    rows = await db`
-      select q.* from heritier.quiz_questions q
-      where q.active and q.difficulty = ${difficulty}
-        and not exists (
-          select 1 from heritier.quiz_question_seen seen
-          where seen.player_id = ${playerId}::uuid and seen.question_id = q.id
-        )
-      order by random() limit 1
-    `;
+    try {
+      const inserted = await generateVerifiedQuizBatch(db, difficulty as "easy" | "medium" | "hard", normalizedCategories, 8);
+      if (inserted > 0) {
+        selected = await unseenQuestion(db, playerId, difficulty, normalizedCategories);
+        if (selected) return selected;
+      }
+    } catch (error) {
+      console.warn("[quiz] recharge IA ignorée", error instanceof Error ? error.message : String(error));
+    }
   }
-  if (!rows[0]) {
-    rows = await db`select * from heritier.quiz_questions where active and difficulty = ${difficulty} order by random() limit 1`;
+
+  // La préférence de catégorie ne doit jamais forcer une répétition si une autre question inédite existe.
+  selected = await unseenQuestion(db, playerId, difficulty, []);
+  if (selected) return selected;
+
+  // Stock mondial épuisé pour ce niveau : tenter une dernière recharge IA sur des catégories variées.
+  const fallbackCategories = normalizedCategories.length
+    ? normalizedCategories
+    : ["general", "science", "history", "geography", "finance", "logic", "iq"];
+  try {
+    const inserted = await generateVerifiedQuizBatch(db, difficulty as "easy" | "medium" | "hard", fallbackCategories, 10);
+    if (inserted > 0) {
+      selected = await unseenQuestion(db, playerId, difficulty, []);
+      if (selected) return selected;
+    }
+  } catch (error) {
+    console.warn("[quiz] recharge IA globale ignorée", error instanceof Error ? error.message : String(error));
   }
+
+  // Ultime secours hors ligne : reprendre la question vue il y a le plus longtemps, jamais une répétition aléatoire immédiate.
+  const rows = fallbackCategories.length
+    ? await db`
+        select q.*
+        from heritier.quiz_questions q
+        left join heritier.quiz_question_seen seen
+          on seen.player_id=${playerId}::uuid and seen.question_id=q.id
+        where q.active and q.difficulty=${difficulty} and q.category=any(${fallbackCategories}::text[])
+        order by seen.seen_at asc nulls first, random()
+        limit 1
+      `
+    : await db`
+        select q.*
+        from heritier.quiz_questions q
+        left join heritier.quiz_question_seen seen
+          on seen.player_id=${playerId}::uuid and seen.question_id=q.id
+        where q.active and q.difficulty=${difficulty}
+        order by seen.seen_at asc nulls first, random()
+        limit 1
+      `;
   if (!rows[0]) throw new ApiError(503, "La banque de questions est momentanément vide");
   return rows[0];
 }
