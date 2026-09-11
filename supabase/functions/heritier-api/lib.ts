@@ -3,11 +3,11 @@ import postgres from "npm:postgres@3.4.7";
 const DB_URL = Deno.env.get("SUPABASE_DB_URL");
 if (!DB_URL) throw new Error("SUPABASE_DB_URL is required");
 
-export const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "https://smwrpejnegtssmtmnecb.supabase.co";
+export const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "https://hzyxrubwggcjueqkongh.supabase.co";
 export const PUBLIC_KEY =
   Deno.env.get("SUPABASE_PUBLISHABLE_KEY") ??
   Deno.env.get("SUPABASE_ANON_KEY") ??
-  "sb_publishable_3-7XDsd5zEd-3rrqr0-xgQ_kk0z3ArR";
+  "sb_publishable_03fRORDfOBFt7PO7RcNEEA_zA8_fQbO";
 
 export const sql: any = postgres(DB_URL, {
   max: 3,
@@ -296,3 +296,4 @@ export function secondsUntil(last: unknown, cooldownSeconds: number): number {
   const elapsed = (Date.now() - new Date(String(last)).getTime()) / 1000;
   return Math.max(0, Math.ceil(cooldownSeconds - elapsed));
 }
+
