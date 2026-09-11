@@ -2,7 +2,7 @@
 
 ## Pré-requis
 
-- accès au projet Supabase `smwrpejnegtssmtmnecb` ;
+- accès au projet Supabase `hzyxrubwggcjueqkongh` ;
 - CLI Supabase récente ;
 - dépôt client Vercel configuré avec les variables publiques décrites plus bas.
 
@@ -15,7 +15,7 @@ deno check supabase/functions/heritier-api/index.ts
 ## 2. Appliquer les migrations
 
 ```bash
-supabase link --project-ref smwrpejnegtssmtmnecb
+supabase link --project-ref hzyxrubwggcjueqkongh
 supabase db push
 ```
 
@@ -42,8 +42,8 @@ le jeton via Supabase Auth dans `authenticate()`.
 ## 4. Configurer le client Vercel
 
 ```env
-NEXT_PUBLIC_SUPABASE_URL=https://smwrpejnegtssmtmnecb.supabase.co
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_3-7XDsd5zEd-3rrqr0-xgQ_kk0z3ArR
+NEXT_PUBLIC_SUPABASE_URL=https://hzyxrubwggcjueqkongh.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_03fRORDfOBFt7PO7RcNEEA_zA8_fQbO
 ```
 
 Le client est un export statique Next.js. Il ne doit contenir ni réécriture
@@ -67,3 +67,4 @@ Le client est un export statique Next.js. Il ne doit contenir ni réécriture
 - Ancienne base Render : la garder suspendue comme archive tant que la migration
   historique n’a pas été formellement clôturée. Elle n’est pas utilisée par la
   production.
+

@@ -479,9 +479,10 @@ async function joinGame(user: AuthUser, gameId: string): Promise<any> {
   `;
   await touchPresence(user, gameId, rows[0]);
   try {
-    await sql`select public.sync_external_game_economy(${user.id}::uuid,'heritier-millionnaire','smwrpejnegtssmtmnecb',${user.id}::uuid,'{}'::jsonb,'{}'::jsonb,'[]'::jsonb)`;
+    await sql`select public.sync_external_game_economy(${user.id}::uuid,'heritier-millionnaire','hzyxrubwggcjueqkongh',${user.id}::uuid,'{}'::jsonb,'{}'::jsonb,'[]'::jsonb)`;
   } catch (error) {
     console.warn("[heritier] central wallet link deferred", error instanceof Error ? error.message : String(error));
   }
   return rows[0];
 }
+

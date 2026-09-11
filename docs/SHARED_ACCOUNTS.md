@@ -7,7 +7,7 @@ compte d’un jeu à l’autre.
 ## Intégration web
 
 1. Authentifier l’utilisateur avec l’API Auth du projet
-   `smwrpejnegtssmtmnecb`.
+   `hzyxrubwggcjueqkongh`.
 2. Stocker la session sous `HM_TOKEN` et `HM_REFRESH_TOKEN`.
 3. Envoyer `Authorization: Bearer <HM_TOKEN>` à l’Edge Function concernée.
 4. Rafraîchir le jeton avec `grant_type=refresh_token` avant son expiration ou
@@ -30,3 +30,4 @@ header `X-Player-ID` n’est donc jamais une preuve d’identité à lui seul.
 L’ancien système de cookies Render (`hm_auth`, `hm_guest`, `hm_csrf`) et les JWT
 propriétaires sont archivés. Ils ne doivent pas être intégrés dans de nouveaux
 clients.
+

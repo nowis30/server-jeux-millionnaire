@@ -7,9 +7,9 @@ Le client statique reste déployé sur Vercel.
 ## Production
 
 - Client : <https://client-jeux-millionnaire.vercel.app>
-- API : <https://smwrpejnegtssmtmnecb.supabase.co/functions/v1/heritier-api>
-- Santé : <https://smwrpejnegtssmtmnecb.supabase.co/functions/v1/heritier-api/health>
-- Projet Supabase : `smwrpejnegtssmtmnecb`
+- API : <https://hzyxrubwggcjueqkongh.supabase.co/functions/v1/heritier-api>
+- Santé : <https://hzyxrubwggcjueqkongh.supabase.co/functions/v1/heritier-api/health>
+- Projet Supabase : `hzyxrubwggcjueqkongh`
 
 ## Architecture
 
@@ -31,7 +31,7 @@ droits serveur.
 Avec la CLI Supabase installée :
 
 ```bash
-supabase link --project-ref smwrpejnegtssmtmnecb
+supabase link --project-ref hzyxrubwggcjueqkongh
 supabase functions serve heritier-api --no-verify-jwt
 ```
 
@@ -47,3 +47,4 @@ Consultez [DEPLOY.md](./DEPLOY.md). Les changements de base doivent toujours
 Render n’est plus une dépendance d’exécution. L’ancien service et son ancienne
 base peuvent rester suspendus temporairement comme archive de sécurité jusqu’à
 la fin de la période de conservation choisie.
+
