@@ -1,3 +1,4 @@
+import { consumeRewardIntent } from "./rewards.ts";
 import {
   ApiError,
   type AuthUser,
@@ -85,12 +86,13 @@ export async function handleQuiz(req:Request,_url:URL,path:string,user:AuthUser|
     const requested=Array.isArray(payload.selectedCategories)?payload.selectedCategories.map(String):[];
     const categories=requested.filter((category)=>VALID_CATEGORIES.has(category)).slice(0,20);
     const result=await sql.begin(async(tx:any)=>{
-      const existing=await activeSession(tx,match![1],player.id,true);
+      // Serialize starts before checking for an active session, so concurrent taps resume it.
+      const players=await tx`select * from heritier.players where id=${player.id}::uuid for update`;
+      const existing=await activeSession(tx,match![1],player.id);
       if(existing){
         const questions=await tx`select * from heritier.quiz_questions where id=${existing.current_question_id}::uuid`;
         return {sessionId:existing.id,...sessionPayload(existing),question:mapQuestion(questions[0])};
       }
-      const players=await tx`select * from heritier.players where id=${player.id}::uuid for update`;
       fail(Number(players[0].quiz_tokens)>0,403,"Aucun token Quiz disponible");
       const question=await selectQuizQuestion(tx,player.id,1,categories);
       await tx`update heritier.players set quiz_tokens=quiz_tokens-1 where id=${player.id}::uuid`;
@@ -130,6 +132,7 @@ export async function handleQuiz(req:Request,_url:URL,path:string,user:AuthUser|
       const sessions=await tx`select * from heritier.quiz_sessions where id=${sessionId}::uuid and game_id=${match![1]}::uuid and player_id=${player.id}::uuid for update`;
       fail(sessions[0]&&sessions[0].status==="active",409,"Session inactive");fail(sessions[0].current_question_id===questionId,409,"Cette question n’est plus active");
       const questions=await tx`select * from heritier.quiz_questions where id=${questionId}::uuid`;fail(questions[0],404,"Question introuvable");
+      await consumeRewardIntent(tx,payload.rewardIntentId,player.id,"quiz-reveal",{sessionId,questionId});
       const advanced=await advanceCorrect(tx,sessions[0],player.id,questions[0],"REVEAL");
       return {revealed:true,correctAnswer:questions[0].correct_answer,...advanced,message:`Réponse ${questions[0].correct_answer} révélée ✅`};
     });

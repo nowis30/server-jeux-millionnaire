@@ -48,3 +48,14 @@ Render n’est plus une dépendance d’exécution. L’ancien service et son an
 base peuvent rester suspendus temporairement comme archive de sécurité jusqu’à
 la fin de la période de conservation choisie.
 
+
+## Maintenance de sécurité — octobre 2026
+
+Les requêtes JSON sont limitées à 64 Kio, y compris sans en-tête Content-Length fiable. L’authentification distante a un délai maximal de dix secondes. Les créations de session Quiz concurrentes sont sérialisées sur le joueur avant lecture de la session active.
+
+Les récompenses publicitaires utilisent désormais des reçus AdMob signés à usage unique. Lire [le protocole et les prérequis de publication](docs/REWARD_VERIFICATION.md) : les changements serveur, client et Android doivent être coordonnés avant publication.
+
+```sh
+deno test --allow-env --allow-read --allow-write --config=supabase/functions/heritier-api/deno.json supabase/tests/
+deno check --config=supabase/functions/heritier-api/deno.json supabase/functions/heritier-api/index.ts
+```
