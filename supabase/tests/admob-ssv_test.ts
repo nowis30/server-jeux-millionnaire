@@ -38,3 +38,13 @@ Deno.test("percent-escaped values use the reference verifier's decoded query", a
   const callback = signed(query.replace('reward_item=coins', 'reward_item=virtual%20coins%2Bbonus'));
   assert.equal((await verifyAdmobCallback(callback, new Set(["3604239096"]), keys)).intentId, intentId);
 });
+
+for (const [label, invalid] of [
+  ["delimiter inside a decoded value", query.replace('reward_item=coins', 'reward_item=coins%26bonus')],
+  ["equals sign inside a parameter name", query.replace('reward_item=', 'reward%3Ditem=')],
+  ["delimiter inside a parameter name", query.replace('reward_item=', 'reward%26item=')],
+] as const) {
+  Deno.test(`reject ambiguous input: ${label}`, async () => {
+    await assert.rejects(verifyAdmobCallback(signed(invalid), new Set(["3604239096"]), keys), { status: 400 });
+  });
+}

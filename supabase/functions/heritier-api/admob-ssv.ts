@@ -60,7 +60,10 @@ export async function verifyAdmobCallback(url: URL, allowedUnits: Set<string>, k
   const match = signedQuery.match(/^(.*)&signature=([^&]+)&key_id=(\d+)$/);
   const p = url.searchParams;
   const names = [...p.keys()];
-  if (!match || new Set(names).size !== names.length) throw new ApiError(400, "Notification publicitaire invalide");
+  // The reference signature covers a decoded query. Reject decoded delimiters
+  // inside fields so signature verification and field parsing share boundaries.
+  const ambiguous = [...p].some(([name, value]) => !/^[a-z][a-z0-9_]*$/i.test(name) || value.includes("&"));
+  if (!match || ambiguous || new Set(names).size !== names.length) throw new ApiError(400, "Notification publicitaire invalide");
   const intentId = p.get("custom_data") ?? "", userId = p.get("user_id") ?? "";
   const transactionId = p.get("transaction_id") ?? "", unit = p.get("ad_unit") ?? "";
   const timestamp = Number(p.get("timestamp"));

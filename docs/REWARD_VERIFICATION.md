@@ -16,6 +16,7 @@ Les tables restent dans le schéma privé `heritier`; `anon` et `authenticated` 
 
 - Appliquer la migration `20261026153014_heritier_reward_verification.sql` dans une base de validation et exécuter les tests avant toute migration de production.
 - Configurer `ADMOB_REWARDED_AD_UNIT_IDS` avec les valeurs exactes du paramètre `ad_unit` autorisées, séparées par des virgules. Pour l’unité native actuellement configurée, la partie numérique est `3604239096`. Vérifier cette valeur dans les callbacks de test AdMob avant activation.
+- Utiliser un nom de récompense sans esperluette (`&`). Le vérificateur refuse ce séparateur dans les valeurs décodées afin de conserver les mêmes frontières de paramètres dans la signature et les champs utilisés. Les espaces et signes plus restent acceptés.
 - Déclarer l’URL SSV `https://<projet>.supabase.co/functions/v1/heritier-api/api/ads/admob/ssv` dans AdMob. Conserver la vérification de signature : le callback est public mais ne peut créditer directement un compte.
 - Distribuer une version Android qui expose `getRewardVerificationSupport` et transmet les paramètres SSV, puis publier ensemble le client et la fonction. Un ancien APK affiche une demande de mise à jour avant toute nouvelle publicité récompensée.
 - Valider sur un appareil un succès, une fermeture avant récompense, un callback retardé, une double demande et une reconnexion. Les clés privées de Google ne sont jamais requises.
