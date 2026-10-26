@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { handleCore } from "./core.ts";
 import { handleExtras } from "./extras.ts";
+import { handleRewards } from "./rewards.ts";
 import { handleQuiz } from "./quiz.ts";
 import {
   ApiError,
@@ -13,7 +14,7 @@ import {
 } from "./lib.ts";
 
 function isPublic(path: string): boolean {
-  return path === "/health" || path === "/healthz" || path === "/api/auth/csrf" ||
+  return path === "/api/ads/admob/ssv" || path === "/health" || path === "/healthz" || path === "/api/auth/csrf" ||
     path === "/api/quiz/public-stats" || path === "/api/properties/templates" ||
     /^\/api\/properties\/templates\/[0-9a-fA-F-]{36}$/.test(path);
 }
@@ -52,7 +53,7 @@ Deno.serve(async (req: Request) => {
       return json({ deleted: true });
     }
 
-    const handlers = [handleCore, handleQuiz, handleExtras];
+    const handlers = [handleRewards, handleCore, handleQuiz, handleExtras];
     for (const handler of handlers) {
       const response = await handler(req, url, path, user);
       if (response) return response;

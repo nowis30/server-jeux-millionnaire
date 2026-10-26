@@ -38,3 +38,6 @@ prisma/.db/
 
 # Misc
 *.local
+
+# Local Supabase CLI state
+supabase/.temp/

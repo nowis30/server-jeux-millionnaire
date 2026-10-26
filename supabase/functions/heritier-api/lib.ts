@@ -1,3 +1,6 @@
+import { ApiError } from "./errors.ts";
+import { readJsonBody } from "./request-body.ts";
+export { ApiError } from "./errors.ts";
 import postgres from "npm:postgres@3.4.7";
 
 const DB_URL = Deno.env.get("SUPABASE_DB_URL");
@@ -22,18 +25,6 @@ export const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
   "Access-Control-Max-Age": "86400",
 };
-
-export class ApiError extends Error {
-  status: number;
-  details?: unknown;
-
-  constructor(status: number, message: string, details?: unknown) {
-    super(message);
-    this.name = "ApiError";
-    this.status = status;
-    this.details = details;
-  }
-}
 
 export type AuthUser = {
   id: string;
@@ -75,16 +66,7 @@ export function string(value: unknown, label: string, options: { min?: number; m
   return parsed;
 }
 
-export async function body(req: Request): Promise<Record<string, unknown>> {
-  if (!req.body) return {};
-  try {
-    const value = await req.json();
-    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("object required");
-    return value as Record<string, unknown>;
-  } catch {
-    throw new ApiError(400, "Corps JSON invalide");
-  }
-}
+export const body = readJsonBody;
 
 export async function authenticate(req: Request): Promise<AuthUser> {
   const authorization = req.headers.get("authorization") ?? "";
@@ -93,6 +75,7 @@ export async function authenticate(req: Request): Promise<AuthUser> {
   const accessToken = match[1];
 
   const response = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+    signal: AbortSignal.timeout(10_000),
     headers: {
       apikey: PUBLIC_KEY,
       authorization: `Bearer ${accessToken}`,

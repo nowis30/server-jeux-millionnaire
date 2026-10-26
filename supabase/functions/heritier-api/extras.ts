@@ -1,3 +1,4 @@
+import { consumeRewardIntent } from "./rewards.ts";
 import {
   ApiError,
   type AuthUser,
@@ -88,6 +89,7 @@ export async function handleExtras(req: Request, url: URL, path: string, user: A
       const cooldown=type==="quiz"?QUIZ_AD_COOLDOWN:PARI_AD_COOLDOWN;
       const remaining=secondsUntil(last,cooldown);
       if(remaining>0) throw new ApiError(429,`Recharge ${type==="quiz"?"Quiz":"Pari"} trop fréquente. Réessayez dans ${Math.ceil(remaining/60)} min.`);
+      await consumeRewardIntent(tx,payload.rewardIntentId,current.id,`${type}-token`);
       if(type==="quiz"){
         const before=Number(rows[0].quiz_tokens),next=Math.min(QUIZ_MAX,before+QUIZ_AD_REWARD),added=next-before;
         await tx`update heritier.players set quiz_tokens=${next},quiz_tokens_updated_at=case when ${added}>0 then now() else quiz_tokens_updated_at end,last_ad_quiz_at=now() where id=${current.id}::uuid`;
@@ -135,10 +137,12 @@ export async function handleExtras(req: Request, url: URL, path: string, user: A
       return json({available:remaining===0,secondsUntilAvailable:remaining,rewardAmount:BONUS_REWARD,lastAdAt:iso(current.last_bonus_at)});
     }
     if(match[2]==="redeem"&&method==="POST"){
+      const payload=await body(req);
       const result=await sql.begin(async(tx:any)=>{
         const rows=await tx`select * from heritier.players where id=${current.id}::uuid for update`;
         const remaining=secondsUntil(rows[0].last_bonus_at,BONUS_COOLDOWN);
         if(remaining>0) throw new ApiError(429,"Bonus en recharge",{secondsUntilAvailable:remaining});
+        await consumeRewardIntent(tx,payload.rewardIntentId,current.id,"bonus");
         const updated=await tx`update heritier.players set cash=cash+${BONUS_REWARD},last_bonus_at=now() where id=${current.id}::uuid returning cash,last_bonus_at`;
         const netRows=await tx`select heritier.recalculate_player(${current.id}::uuid) as net`;
         return {ok:true,rewardAmount:BONUS_REWARD,cash:n(updated[0].cash),netWorth:n(netRows[0].net),secondsUntilNext:BONUS_COOLDOWN,lastAdAt:iso(updated[0].last_bonus_at)};
